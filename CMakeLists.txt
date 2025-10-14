@@ -9,7 +9,7 @@ find_package(Vulkan 1.4.328 REQUIRED)
 add_subdirectory(lib)
 
 # set the output directory for built objects.
-# This makes sure that the dynamic library goes into the build directory automatically.
+# This makes sure that the dynamic library goes into the executable directory automatically.
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
