@@ -8,6 +8,8 @@
 
 bool Engine::createSdlWindow()
 {
+	// initialise STL and create a SDL window
+
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
 		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
 		return false;
@@ -56,7 +58,7 @@ bool Engine::createSwapchain(uint32_t width, uint32_t height)
 
 	_swapchainExtent = vkbSwapchain.extent;
 
-	//store swapchain and its related images
+	// store swapchain and its related images
 	_swapchain = vkbSwapchain.swapchain;
 	_swapchainImages = vkbSwapchain.get_images().value();
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
@@ -120,7 +122,7 @@ bool Engine::initVulkan()
 	_instance = vkbInstance.instance;
 	_debugMessenger = vkbInstance.debug_messenger;
 
-	// create VkSurface from SDL window
+	// create a VkSurface for the SDL window
 
 	SDL_Vulkan_CreateSurface(_window, _instance, nullptr, &_surface);
 
@@ -210,7 +212,6 @@ void Engine::run()
 			_stopRendering = false;
 			break;
 		default:
-			//SDL_Log("Unhandled Event!");
 			break;
 		}
 

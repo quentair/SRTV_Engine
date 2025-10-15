@@ -1,7 +1,7 @@
 #include "engine.h"
 #include <iostream>
 
-void main(void) {
+int main(int argc, char* argv[]) {
 	
 	Engine engine{};
 
@@ -12,4 +12,6 @@ void main(void) {
 	engine.run();
 
 	engine.cleanup();
+
+	return 0;
 }
