@@ -27,7 +27,7 @@ target_compile_definitions(SRTVEngine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 target_link_libraries(SRTVEngine PUBLIC Vulkan::Vulkan vk-bootstrap vma SDL3::SDL3 glm fmt::fmt stb_image imgui)
 
-# copy the .dll file to the same folder as the executable (SDL2 especially)
+# copy the .dll file to the same folder as the executable (SDL3 especially)
 
 add_custom_command(
 	TARGET SRTVEngine POST_BUILD

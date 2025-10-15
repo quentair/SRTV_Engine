@@ -1,4 +1,4 @@
-# SDL2
+# SDL3
 
 add_subdirectory(SDL EXCLUDE_FROM_ALL)
 
