@@ -4,7 +4,6 @@
 #include <string>
 #include <mutex>
 
-#include <fmt/os.h>
 #include <fmt/color.h>
 
 #ifdef _WIN32
@@ -55,7 +54,7 @@ class Logger {
 		log(Severity::trace, std::move(message));
 	}
 
-	void logDebug(std::string message) 
+	void logDebug(std::string message)
 	{
 		log(Severity::debug, std::move(message));
 	}
@@ -95,15 +94,14 @@ class Logger {
 
 	void freeFile();
 
-	std::string severityToString(Severity severity);
+	std::string severityToString(Severity severity) const;
 
-	const fmt::color severityToColor(Severity severity);
+	const fmt::color severityToColor(Severity severity) const;
 
 	void log(Severity severity, std::string message);
 
 	void logToConsole(std::string severityString, const fmt::color backgroundColor, std::string message);
 
 	void logToFile(std::string severityString, std::string message);
-
 };
 } // namespace srtv_engine

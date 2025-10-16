@@ -3,7 +3,6 @@
 #include <filesystem>
 
 #include <fmt/core.h>
-#include <fmt/os.h>
 #include <fmt/chrono.h>
 
 namespace srtv_engine {
@@ -22,7 +21,7 @@ void Logger::setLogFile(std::string filePath)
 	filePath = logFileRelativePath.string();
 
 	// trace message for the file change event
-	std::string message = "Set log file : " + logFileAbsolutePath.string();
+	std::string message = "Logger stopped to write in file : " + logFileAbsolutePath.string();
 
 	// try to write in current file to record file change
 	if (_logFile) {
@@ -33,9 +32,13 @@ void Logger::setLogFile(std::string filePath)
 
 	// open new file in write only mode
 	_logFile = std::fopen(filePath.c_str(), "w");
+
+	// write in new file to record file change
+	message = "Logger began to write in file : " + logFileAbsolutePath.string();
+	logTrace(message);
 }
 
-std::string Logger::severityToString(Severity severity)
+std::string Logger::severityToString(Severity severity) const
 {
 	std::string severityString;
 
@@ -73,7 +76,7 @@ void Logger::freeFile()
 	}
 }
 
-const fmt::color Logger::severityToColor(Severity severity)
+const fmt::color Logger::severityToColor(Severity severity) const
 {
 	fmt::color color;
 
