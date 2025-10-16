@@ -9,6 +9,9 @@ add_executable(SRTVEngine
 
 	engine.cpp
 	${INCLUDE_DIR}/engine.h
+
+	logger.cpp
+	${INCLUDE_DIR}/logger.h
 	)
 
 ## add include files

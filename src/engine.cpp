@@ -6,76 +6,7 @@
 #include <fmt/core.h>
 #include <thread>
 
-bool Engine::createSdlWindow()
-{
-	// initialise STL and create a SDL window
-
-	if (!SDL_Init(SDL_INIT_VIDEO)) {
-		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-		return false;
-	}
-
-	_window = SDL_CreateWindow("SRTV Engine",
-		_windowExtent.width,
-		_windowExtent.height,
-		SDL_WINDOW_VULKAN
-	);
-
-	if (!_window) {
-		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-		return false;
-	}
-
-	return true;
-}
-
-bool Engine::initSwapchain()
-{
-	return createSwapchain(_windowExtent.width, _windowExtent.height);
-}
-
-bool Engine::createSwapchain(uint32_t width, uint32_t height)
-{
-	// create the vulkan swapchain with vk-bootstrap
-
-	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
-
-	_swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-	VkSurfaceFormatKHR surfaceFormat{ .format = _swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-
-	auto swapchainBuilderReturn = swapchainBuilder
-		.set_desired_format(surfaceFormat)
-		.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-		.set_desired_extent(width, height)
-		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-		.build();
-
-	if (!swapchainBuilderReturn) {
-		std::cout << swapchainBuilderReturn.error().message() << std::endl;
-		return false;
-	}
-	vkb::Swapchain vkbSwapchain = swapchainBuilderReturn.value();
-
-	_swapchainExtent = vkbSwapchain.extent;
-
-	// store swapchain and its related images
-	_swapchain = vkbSwapchain.swapchain;
-	_swapchainImages = vkbSwapchain.get_images().value();
-	_swapchainImageViews = vkbSwapchain.get_image_views().value();
-
-	return true;
-}
-
-void Engine::destroySwapchain()
-{
-	vkDestroySwapchainKHR(_device, _swapchain, nullptr);
-
-	// destroy swapchain resources
-	for (int i = 0; i < _swapchainImageViews.size(); i++) {
-
-		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
-	}
-}
+namespace srtv_engine {
 
 bool Engine::init()
 {
@@ -106,7 +37,7 @@ bool Engine::initVulkan()
 
 	auto instanceReturn = instanceBuilder.set_app_name("SRTV_Engine")
 		.set_engine_name("SRTV_Engine")
-		.request_validation_layers(useValidationLayers)				// use validation layers
+		.request_validation_layers(_useValidationLayers)				// use validation layers
 		.use_default_debug_messenger()				// TODO : change for custom logger ?
 		.require_api_version(1, 3, 0)
 		.build();
@@ -241,3 +172,76 @@ void Engine::cleanup()
 		SDL_DestroyWindow(_window);
 	}
 }
+
+bool Engine::createSdlWindow()
+{
+	// initialise STL and create a SDL window
+
+	if (!SDL_Init(SDL_INIT_VIDEO)) {
+		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
+		return false;
+	}
+
+	_window = SDL_CreateWindow("SRTV Engine",
+		_windowExtent.width,
+		_windowExtent.height,
+		SDL_WINDOW_VULKAN
+	);
+
+	if (!_window) {
+		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
+		return false;
+	}
+
+	return true;
+}
+
+bool Engine::initSwapchain()
+{
+	return createSwapchain(_windowExtent.width, _windowExtent.height);
+}
+
+bool Engine::createSwapchain(uint32_t width, uint32_t height)
+{
+	// create the vulkan swapchain with vk-bootstrap
+
+	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
+
+	_swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+	VkSurfaceFormatKHR surfaceFormat{ .format = _swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+
+	auto swapchainBuilderReturn = swapchainBuilder
+		.set_desired_format(surfaceFormat)
+		.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+		.set_desired_extent(width, height)
+		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+		.build();
+
+	if (!swapchainBuilderReturn) {
+		std::cout << swapchainBuilderReturn.error().message() << std::endl;
+		return false;
+	}
+	vkb::Swapchain vkbSwapchain = swapchainBuilderReturn.value();
+
+	_swapchainExtent = vkbSwapchain.extent;
+
+	// store swapchain and its related images
+	_swapchain = vkbSwapchain.swapchain;
+	_swapchainImages = vkbSwapchain.get_images().value();
+	_swapchainImageViews = vkbSwapchain.get_image_views().value();
+
+	return true;
+}
+
+void Engine::destroySwapchain()
+{
+	vkDestroySwapchainKHR(_device, _swapchain, nullptr);
+
+	// destroy swapchain resources
+	for (int i = 0; i < _swapchainImageViews.size(); i++) {
+
+		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
+	}
+}
+
+} // namespace srtv_engine
