@@ -2,8 +2,6 @@
 
 namespace srtv_engine {
 
-const std::unique_ptr<Logger> EngineLogger::_engineLogger = std::make_unique<Logger>();
-
 void EngineLogger::init()
 {
 	_engineLogger->setSeverity(srtv_engine::Logger::Severity::all);
