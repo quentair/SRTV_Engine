@@ -25,9 +25,9 @@ public:
 
 	inline bool isRunning() { return _isInitialized; }
 
-	bool init();
+	void init();
 
-	bool initVulkan();
+	void initVulkan();
 
 	void run();
 
@@ -52,7 +52,7 @@ public:
 	// window
 	VkExtent2D _windowExtent{ 1700 , 900 };
 	SDL_Window* _window;
-	bool createSdlWindow();
+	void createSdlWindow();
 
 	// surface
 	VkSurfaceKHR _surface;
@@ -63,8 +63,8 @@ public:
 	std::vector<VkImage> _swapchainImages;
 	std::vector<VkImageView> _swapchainImageViews;
 	VkExtent2D _swapchainExtent;
-	bool initSwapchain();
-	bool createSwapchain(uint32_t width, uint32_t height);
+	void initSwapchain();
+	void createSwapchain(uint32_t width, uint32_t height);
 	void destroySwapchain();
 
 	// frame

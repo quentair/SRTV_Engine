@@ -11,28 +11,20 @@
 
 namespace srtv_engine {
 
-bool Engine::init()
+void Engine::init()
 {
-	if (!createSdlWindow()) {
-		ENGINE_LOG_ERROR("Failed to initialise SDL window.");
-		return false;
-	}
+	createSdlWindow();
 
-	if (!initVulkan()) {
-		ENGINE_LOG_ERROR("Failed to initialise Vulkan.");
-		return false;
-	}
+	initVulkan();
 
-	if (!initSwapchain()) {
-		ENGINE_LOG_ERROR("Failed to create swapchain.");
-		return false;
-	}
+	initSwapchain();
+
+	init_commands();
+
 	_isInitialized = true;
-
-	return true;
 }
 
-bool Engine::initVulkan()
+void Engine::initVulkan()
 {
 	// create the vulkan instance with vk-bootstrap
 
@@ -131,8 +123,6 @@ bool Engine::initVulkan()
 	_graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
 	ENGINE_LOG_TRACE("Vulkan Queue acquisition went fine");
-
-	return true;
 }
 
 void Engine::run()
@@ -175,6 +165,13 @@ void Engine::cleanup()
 {
 	// destroy in reversed creation order
 	if (_isInitialized) {
+		//make sure the gpu has stopped doing its things
+		vkDeviceWaitIdle(_device);
+
+		for (int i = 0; i < FRAME_OVERLAP; i++) {
+			vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
+		}
+
 		destroySwapchain();
 
 		vkDestroyDevice(_device, nullptr);
@@ -189,13 +186,12 @@ void Engine::cleanup()
 	}
 }
 
-bool Engine::createSdlWindow()
+void Engine::createSdlWindow()
 {
 	// initialise SDL and create a SDL window
 
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
-		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-		return false;
+		ENGINE_LOG_FATAL(fmt::format("Detected SDL fatal error: {}", SDL_GetError()));
 	}
 
 	_window = SDL_CreateWindow("SRTV Engine",
@@ -205,19 +201,16 @@ bool Engine::createSdlWindow()
 	);
 
 	if (!_window) {
-		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-		return false;
+		ENGINE_LOG_FATAL(fmt::format("Detected SDL fatal error: {}", SDL_GetError()));
 	}
-
-	return true;
 }
 
-bool Engine::initSwapchain()
+void Engine::initSwapchain()
 {
-	return createSwapchain(_windowExtent.width, _windowExtent.height);
+	createSwapchain(_windowExtent.width, _windowExtent.height);
 }
 
-bool Engine::createSwapchain(uint32_t width, uint32_t height)
+void Engine::createSwapchain(uint32_t width, uint32_t height)
 {
 	// create the vulkan swapchain with vk-bootstrap
 
@@ -247,8 +240,6 @@ bool Engine::createSwapchain(uint32_t width, uint32_t height)
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
 
 	ENGINE_LOG_TRACE("Vulkan Swapchain creation went fine");
-
-	return true;
 }
 
 void Engine::destroySwapchain()
@@ -264,7 +255,44 @@ void Engine::destroySwapchain()
 
 void Engine::init_commands()
 {
+	// create a command pool for commands submitted to the graphics queue.
+	// we also want the pool to allow for resetting of individual command buffers
 
+	ENGINE_LOG_TRACE("Building Vulkan Command Pool...");
+
+	VkCommandPoolCreateInfo commandPoolCreateInfo = {};
+	commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	commandPoolCreateInfo.pNext = nullptr;
+	commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	commandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
+
+	ENGINE_LOG_TRACE("Vulkan Command Pool creation went fine");
+
+	ENGINE_LOG_TRACE("Building Vulkan Commands (double buffering)...");
+
+	for (int i = 0; i < FRAME_OVERLAP; i++) {
+		CHECK_VK_FATAL_ERROR(vkCreateCommandPool(
+			_device,
+			&commandPoolCreateInfo,
+			nullptr,
+			&_frames[i]._commandPool));
+
+		// allocate the defaults command buffers that we will use for rendering
+
+		VkCommandBufferAllocateInfo cmdAllocInfo = {};
+		cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdAllocInfo.pNext = nullptr;
+		cmdAllocInfo.commandPool = _frames[i]._commandPool;
+		cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdAllocInfo.commandBufferCount = 1;
+
+		CHECK_VK_FATAL_ERROR(vkAllocateCommandBuffers(
+			_device,
+			&cmdAllocInfo,
+			&_frames[i]._commandBuffer));
+	}
+
+	ENGINE_LOG_TRACE("Vulkan Commands creation went fine");
 }
 
 } // namespace srtv_engine

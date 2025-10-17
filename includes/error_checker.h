@@ -12,7 +12,7 @@ namespace srtv_engine::utils {
     do {                                                                \
         VkResult err = x;                                               \
         if (err) {                                                      \
-            ENGINE_LOG_ERROR("Detected Vulkan error: " + string_VkResult(err));; \
+            ENGINE_LOG_ERROR(fmt::format("Detected Vulkan error: {}", string_VkResult(err))); \
         }                                                               \
     } while (0)
 
@@ -20,8 +20,7 @@ namespace srtv_engine::utils {
     do {                                                                \
         VkResult err = x;                                               \
         if (err) {                                                      \
-            ENGINE_LOG_FATAL("Detected Vulkan fatal error: " + string_VkResult(err));; \
-            abort();                                                    \
+            ENGINE_LOG_FATAL(fmt::format("Detected Vulkan fatal error: {}", string_VkResult(err))); \
         }                                                               \
     } while (0)
 

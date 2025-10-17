@@ -21,12 +21,9 @@ int main(int argc, char* argv[]) {
 
 	srtv_engine::Engine engine{};
 
-	if (!engine.init()) {
-		std::cerr << "Engine initialisation failed." << std::endl;
-	}
-	else {
-		engine.run();
-	}
+	engine.init();
+
+	engine.run();
 
 	engine.cleanup();
 
