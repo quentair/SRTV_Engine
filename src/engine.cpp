@@ -6,22 +6,25 @@
 #include <fmt/core.h>
 #include <thread>
 
+#include "error_checker.h"
+#include "engine_logger.h"
+
 namespace srtv_engine {
 
 bool Engine::init()
 {
 	if (!createSdlWindow()) {
-		std::cerr << "Failed to initialise SDL window." << std::endl;
+		ENGINE_LOG_ERROR("Failed to initialise SDL window.");
 		return false;
 	}
 
 	if (!initVulkan()) {
-		std::cerr << "Failed to initialise Vulkan." << std::endl;
+		ENGINE_LOG_ERROR("Failed to initialise Vulkan.");
 		return false;
 	}
 
 	if (!initSwapchain()) {
-		std::cerr << "Failed to create swapchain." << std::endl;
+		ENGINE_LOG_ERROR("Failed to create swapchain.");
 		return false;
 	}
 	_isInitialized = true;
@@ -33,31 +36,38 @@ bool Engine::initVulkan()
 {
 	// create the vulkan instance with vk-bootstrap
 
+	ENGINE_LOG_TRACE("Building Vulkan Instance...");
+
 	vkb::InstanceBuilder instanceBuilder;
 
 	auto instanceReturn = instanceBuilder.set_app_name("SRTV_Engine")
 		.set_engine_name("SRTV_Engine")
-		.request_validation_layers(_useValidationLayers)				// use validation layers
+		.request_validation_layers(_useValidationLayers)				// use validation layers ?
 		.use_default_debug_messenger()				// TODO : change for custom logger ?
 		.require_api_version(1, 3, 0)
 		.build();
 
-	// simple error checking and helpful error messages
-	if (!instanceReturn) {
-		std::cerr << "Failed to create Vulkan instance. Error: " << instanceReturn.error().message() << std::endl;
-		return false;
-	}
+	CHECK_VKB_FATAL_ERROR(instanceReturn);
+
 	vkb::Instance vkbInstance = instanceReturn.value();
 
 	// get the VkInstance handle used in the rest of a vulkan application
 	_instance = vkbInstance.instance;
 	_debugMessenger = vkbInstance.debug_messenger;
 
+	ENGINE_LOG_TRACE("Vulkan Instance creation went fine");
+
 	// create a VkSurface for the SDL window
+
+	ENGINE_LOG_TRACE("Building Vulkan Surface with SDL...");
 
 	SDL_Vulkan_CreateSurface(_window, _instance, nullptr, &_surface);
 
+	ENGINE_LOG_TRACE("Vulkan Surface creation went fine");
+
 	// select a physical device (GPU) that is suitable for the engine
+
+	ENGINE_LOG_TRACE("Selecting Vulkan Device...");
 
 	vkb::PhysicalDeviceSelector physicalDeviceSelector{vkbInstance};
 
@@ -78,19 +88,7 @@ bool Engine::initVulkan()
 		.set_surface(_surface)
 		.select();
 
-	if (!physicalDeviceSelectorReturn) {
-		std::cerr << "Failed to select Vulkan Physical Device. Error: " << physicalDeviceSelectorReturn.error().message() << std::endl;
-		if (physicalDeviceSelectorReturn.error() == vkb::PhysicalDeviceError::no_suitable_device) {
-			const auto& detailed_reasons = physicalDeviceSelectorReturn.detailed_failure_reasons();
-			if (!detailed_reasons.empty()) {
-				std::cerr << "GPU Selection failure reasons: " << std::endl;
-				for (const std::string& reason : detailed_reasons) {
-					std::cerr << reason << std::endl;
-				}
-			}
-		}
-		return false;
-	}
+	CHECK_VKB_FATAL_ERROR(physicalDeviceSelectorReturn);
 	vkb::PhysicalDevice VkbPhysicalDevice = physicalDeviceSelectorReturn.value();
 
 	// optional extensions
@@ -102,19 +100,37 @@ bool Engine::initVulkan()
 	// get the VkPhysicalDevice handle used in the rest of a vulkan application
 	_chosenGPU = VkbPhysicalDevice.physical_device;
 
+	ENGINE_LOG_TRACE("Vulkan Device selection went fine");
+
 	// create the vulkan device with vk-bootstrap
+
+	ENGINE_LOG_TRACE("Building Vulkan Device...");
 
 	vkb::DeviceBuilder deviceBuilder{VkbPhysicalDevice};
 
 	// automatically propagate needed data from instance & physical device
 	auto deviceReturn = deviceBuilder.build();
-	if (!deviceReturn) {
-		std::cerr << "Failed to create Vulkan device. Error: " << deviceReturn.error().message() << std::endl;
-		return false;
-	}
+
+	CHECK_VKB_FATAL_ERROR(deviceReturn);
+
 	vkb::Device vkbDevice = deviceReturn.value();
 	// get the VkDevice handle used in the rest of a vulkan application
 	_device = vkbDevice.device;
+
+	ENGINE_LOG_TRACE("Vulkan Device creation went fine");
+
+	// get a queue for graphics from our device
+
+	ENGINE_LOG_TRACE("Getting Vulkan Queue...");
+
+	auto queueReturn = vkbDevice.get_queue(vkb::QueueType::graphics);
+
+	CHECK_VKB_FATAL_ERROR(queueReturn);
+
+	_graphicsQueue = queueReturn.value();
+	_graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+	ENGINE_LOG_TRACE("Vulkan Queue acquisition went fine");
 
 	return true;
 }
@@ -131,7 +147,7 @@ void Engine::run()
 
 		switch (e.type) {
 		case SDL_EVENT_KEY_DOWN :
-			fmt::print("Key pressed : {}\n", SDL_GetKeyName(e.key.key));
+			ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
 			break;
 		case SDL_EVENT_QUIT :
 			quit = true;
@@ -175,7 +191,7 @@ void Engine::cleanup()
 
 bool Engine::createSdlWindow()
 {
-	// initialise STL and create a SDL window
+	// initialise SDL and create a SDL window
 
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
 		SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
@@ -205,6 +221,8 @@ bool Engine::createSwapchain(uint32_t width, uint32_t height)
 {
 	// create the vulkan swapchain with vk-bootstrap
 
+	ENGINE_LOG_TRACE("Building Vulkan Swapchain with SDL...");
+
 	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
 
 	_swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
@@ -217,10 +235,8 @@ bool Engine::createSwapchain(uint32_t width, uint32_t height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		.build();
 
-	if (!swapchainBuilderReturn) {
-		std::cout << swapchainBuilderReturn.error().message() << std::endl;
-		return false;
-	}
+	CHECK_VKB_FATAL_ERROR(swapchainBuilderReturn);
+
 	vkb::Swapchain vkbSwapchain = swapchainBuilderReturn.value();
 
 	_swapchainExtent = vkbSwapchain.extent;
@@ -229,6 +245,8 @@ bool Engine::createSwapchain(uint32_t width, uint32_t height)
 	_swapchain = vkbSwapchain.swapchain;
 	_swapchainImages = vkbSwapchain.get_images().value();
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
+
+	ENGINE_LOG_TRACE("Vulkan Swapchain creation went fine");
 
 	return true;
 }
@@ -242,6 +260,11 @@ void Engine::destroySwapchain()
 
 		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
 	}
+}
+
+void Engine::init_commands()
+{
+
 }
 
 } // namespace srtv_engine

@@ -78,6 +78,7 @@ class Logger {
 	{
 		log(Severity::fatal, std::move(message));
 		DEBUG_BREAK();
+		abort();
 	}
 
   private:

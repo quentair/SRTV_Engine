@@ -10,6 +10,8 @@ add_executable(SRTVEngine
 	engine.cpp
 	${INCLUDE_DIR}/engine.h
 
+	${INCLUDE_DIR}/error_checker.h
+
 	logger.cpp
 	${INCLUDE_DIR}/logger.h
 

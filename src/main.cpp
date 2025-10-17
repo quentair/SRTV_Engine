@@ -17,15 +17,16 @@ int main(int argc, char* argv[]) {
 
 	srtv_engine::ENGINE_LOG_ERROR("ERROR_TEST");
 
-	srtv_engine::ENGINE_LOG_FATAL("FATAL_TEST");
+	//srtv_engine::ENGINE_LOG_FATAL("FATAL_TEST");
 
 	srtv_engine::Engine engine{};
 
 	if (!engine.init()) {
 		std::cerr << "Engine initialisation failed." << std::endl;
 	}
-
-	engine.run();
+	else {
+		engine.run();
+	}
 
 	engine.cleanup();
 

@@ -8,6 +8,15 @@
 namespace srtv_engine
 {
 
+class FrameData {
+public :
+
+	VkCommandPool _commandPool;
+	VkCommandBuffer _commandBuffer;
+};
+
+constexpr unsigned int FRAME_OVERLAP = 2;
+
 class Engine {
 
 public:
@@ -57,6 +66,18 @@ public:
 	bool initSwapchain();
 	bool createSwapchain(uint32_t width, uint32_t height);
 	void destroySwapchain();
+
+	// frame
+	FrameData _frames[FRAME_OVERLAP];
+	int _frameNumber{ 0 };
+	FrameData& getCurrentFrame() { return _frames[_frameNumber % FRAME_OVERLAP]; }
+
+	// commands
+	void init_commands();
+
+	// queue
+	VkQueue _graphicsQueue;
+	uint32_t _graphicsQueueFamily;
 };
 
 } // namespace srtv_engine
