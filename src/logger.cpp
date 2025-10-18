@@ -115,13 +115,13 @@ void Logger::log(Severity severity, std::string message)
 	{
 		const std::lock_guard<std::mutex> lock(_logMutex);
 
-		logToConsole(std::move(severityToString(severity)), severityToColor(severity), message);
+		logToConsole(severityToString(severity), severityToColor(severity), message);
 
 		if (!_writingToFile)
 			return;
 
 		if (_logFile) {
-			logToFile(std::move(severityToString(severity)), message);
+			logToFile(severityToString(severity), message);
 			return;
 		}
 	}
