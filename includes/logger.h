@@ -1,10 +1,12 @@
 #pragma once
 
-#include <stdint.h>
+
+#include <fmt/color.h>
+
 #include <string>
 #include <mutex>
 
-#include <fmt/color.h>
+#include <stdint.h>
 
 #ifdef _WIN32
 #define DEBUG_BREAK() __debugbreak()

@@ -1,13 +1,13 @@
 #include "engine.h"
 
-#include <iostream>
+#include "error_checker.h"
+#include "engine_logger.h"
 
 #include <SDL3/SDL_vulkan.h>
 #include <fmt/core.h>
-#include <thread>
 
-#include "error_checker.h"
-#include "engine_logger.h"
+#include <thread>
+#include <iostream>
 
 namespace srtv_engine {
 

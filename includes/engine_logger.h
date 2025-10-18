@@ -13,9 +13,9 @@ class EngineLogger {
 
   private:
 
-	  EngineLogger() = delete;
+	EngineLogger() = delete;
 
-	  inline static const std::unique_ptr<Logger> _engineLogger = std::make_unique<Logger>();
+	inline static const std::unique_ptr<Logger> _engineLogger = std::make_unique<Logger>();
 
 	// delete copy constructor and copy assignment operator
 	EngineLogger(const EngineLogger&) = delete;
