@@ -1,20 +1,17 @@
 #pragma once
 
+#include "frame_data.h"
+#include "swapchain.h"
+
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
 
 #include <SDL3/SDL.h>
 
+#include <vector>
+
 namespace srtv_engine
 {
-
-class FrameData {
-public :
-
-	VkCommandPool _commandPool;
-	VkCommandBuffer _commandBuffer;
-};
-
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 class Engine {
@@ -58,13 +55,9 @@ public:
 	VkSurfaceKHR _surface;
 
 	// swapchain
-	VkSwapchainKHR _swapchain;
-	VkFormat _swapchainImageFormat;
-	std::vector<VkImage> _swapchainImages;
-	std::vector<VkImageView> _swapchainImageViews;
-	VkExtent2D _swapchainExtent;
+	Swapchain _swapchain;
 	void initSwapchain();
-	void createSwapchain(uint32_t width, uint32_t height);
+	void resizeSwapchain();
 	void destroySwapchain();
 
 	// frame

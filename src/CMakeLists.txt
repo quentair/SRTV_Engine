@@ -17,6 +17,11 @@ add_executable(SRTVEngine
 
 	engine_logger.cpp
 	${INCLUDE_DIR}/engine_logger.h
+
+	swapchain.cpp
+	${INCLUDE_DIR}/swapchain.h
+
+	${INCLUDE_DIR}/frame_data.h
 	)
 
 ## add include files

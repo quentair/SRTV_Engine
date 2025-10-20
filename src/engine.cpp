@@ -207,50 +207,33 @@ void Engine::createSdlWindow()
 
 void Engine::initSwapchain()
 {
-	createSwapchain(_windowExtent.width, _windowExtent.height);
+	// initialise and create swapchain
+
+	_swapchain.init(_chosenGPU, _device, _surface);
+	_swapchain.create(_windowExtent.width, _windowExtent.height);
 }
 
-void Engine::createSwapchain(uint32_t width, uint32_t height)
+void Engine::resizeSwapchain()
 {
-	// create the vulkan swapchain with vk-bootstrap
+	// destroy out of date swapchain and create a new one with the right size
 
-	ENGINE_LOG_TRACE("Building Vulkan Swapchain with SDL...");
+	vkDeviceWaitIdle(_device);
 
-	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
+	destroySwapchain();
 
-	_swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-	VkSurfaceFormatKHR surfaceFormat{ .format = _swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+	int w, h;
+	SDL_GetWindowSize(_window, &w, &h);
+	_windowExtent.width = w;
+	_windowExtent.height = h;
 
-	auto swapchainBuilderReturn = swapchainBuilder
-		.set_desired_format(surfaceFormat)
-		.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-		.set_desired_extent(width, height)
-		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-		.build();
+	_swapchain.create(_windowExtent.width, _windowExtent.height);
 
-	CHECK_VKB_FATAL_ERROR(swapchainBuilderReturn);
-
-	vkb::Swapchain vkbSwapchain = swapchainBuilderReturn.value();
-
-	_swapchainExtent = vkbSwapchain.extent;
-
-	// store swapchain and its related images
-	_swapchain = vkbSwapchain.swapchain;
-	_swapchainImages = vkbSwapchain.get_images().value();
-	_swapchainImageViews = vkbSwapchain.get_image_views().value();
-
-	ENGINE_LOG_TRACE("Vulkan Swapchain creation went fine");
+	//resize_requested = false;
 }
 
 void Engine::destroySwapchain()
 {
-	vkDestroySwapchainKHR(_device, _swapchain, nullptr);
-
-	// destroy swapchain resources
-	for (int i = 0; i < _swapchainImageViews.size(); i++) {
-
-		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
-	}
+	_swapchain.destroy();
 }
 
 void Engine::init_commands()
