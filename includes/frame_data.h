@@ -9,6 +9,8 @@ class FrameData {
 
 	VkCommandPool _commandPool;
 	VkCommandBuffer _commandBuffer;
+	VkSemaphore _acquireImageSemaphore, _renderSemaphore;
+	VkFence _renderFence;
 };
 
 } // namespace srtv_engine

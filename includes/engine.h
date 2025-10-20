@@ -71,6 +71,9 @@ public:
 	// queue
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
+
+	// synchronisation structures
+	void initSyncStructures();
 };
 
 } // namespace srtv_engine

@@ -21,6 +21,8 @@ void Engine::init()
 
 	init_commands();
 
+	initSyncStructures();
+
 	_isInitialized = true;
 }
 
@@ -238,8 +240,8 @@ void Engine::destroySwapchain()
 
 void Engine::init_commands()
 {
-	// create a command pool for commands submitted to the graphics queue.
-	// we also want the pool to allow for resetting of individual command buffers
+	// create a command pool for commands submitted to the graphics queue
+	// we also want to reset individual command buffers if they are coming from the frames command pool
 
 	ENGINE_LOG_TRACE("Building Vulkan Command Pool...");
 
@@ -253,29 +255,54 @@ void Engine::init_commands()
 
 	ENGINE_LOG_TRACE("Building Vulkan Commands (double buffering)...");
 
-	for (int i = 0; i < FRAME_OVERLAP; i++) {
+	for (auto frame : _frames) {
 		CHECK_VK_FATAL_ERROR(vkCreateCommandPool(
 			_device,
 			&commandPoolCreateInfo,
 			nullptr,
-			&_frames[i]._commandPool));
+			&frame._commandPool));
 
 		// allocate the defaults command buffers that we will use for rendering
 
 		VkCommandBufferAllocateInfo cmdAllocInfo = {};
 		cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdAllocInfo.pNext = nullptr;
-		cmdAllocInfo.commandPool = _frames[i]._commandPool;
+		cmdAllocInfo.commandPool = frame._commandPool;
 		cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		cmdAllocInfo.commandBufferCount = 1;
 
 		CHECK_VK_FATAL_ERROR(vkAllocateCommandBuffers(
 			_device,
 			&cmdAllocInfo,
-			&_frames[i]._commandBuffer));
+			&frame._commandBuffer));
 	}
 
 	ENGINE_LOG_TRACE("Vulkan Commands creation went fine");
+}
+
+void Engine::initSyncStructures()
+{
+	// create semaphores and fences for our frames
+	// 1 fence to control when the gpu has finished rendering the frame
+	// 2 semaphores to syncronize rendering with swapchain
+	// we want the fence to start signalled so we don't wait on it on the first frame
+
+	VkFenceCreateInfo fenceCreateInfo = {};
+	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fenceCreateInfo.pNext = nullptr;
+	fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	VkSemaphoreCreateInfo semaphoreCreateInfo = {};
+	semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	semaphoreCreateInfo.pNext = nullptr;
+	semaphoreCreateInfo.flags = 0;
+
+	for (auto frame : _frames) {
+		vkCreateFence(_device, &fenceCreateInfo, nullptr, &frame._renderFence);
+
+		vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &frame._acquireImageSemaphore);
+		vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &frame._renderSemaphore);
+	}
 }
 
 } // namespace srtv_engine
