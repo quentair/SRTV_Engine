@@ -89,7 +89,7 @@ class Logger {
 
 	std::mutex _logMutex;
 	bool _writingToFile{ false };
-	std::FILE* _logFile;
+	std::FILE* _logFile = nullptr;
 
 	// delete copy constructor and copy assignment operator
 	Logger(const Logger&) = delete;

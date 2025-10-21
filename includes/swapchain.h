@@ -13,7 +13,17 @@ class Swapchain {
 
 	  void create(uint32_t width, uint32_t height);
 
+	  const VkSwapchainKHR* getSwapchain() const { return &_swapchain; }
+
+	  const int numberOfImages() const { return _swapchainImages.size(); }
+
+	  VkImage getImageAt(int index) const { return _swapchainImages[index]; }
+
+	  std::vector<VkSemaphore>& getRenderSemaphores() { return _renderSemaphores; }
+
 	  void destroy();
+
+	  void getNextImage(VkSemaphore acquireImageSemaphore, uint32_t* swapchainImageIndex);
 
   private:
 
@@ -29,6 +39,7 @@ class Swapchain {
 	std::vector<VkImage> _swapchainImages;
 	std::vector<VkImageView> _swapchainImageViews;
 	VkExtent2D _swapchainExtent;
+	std::vector<VkSemaphore> _renderSemaphores;
 };
 
 } // namespace srtv_engine

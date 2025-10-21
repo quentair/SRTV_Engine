@@ -36,10 +36,11 @@ void srtv_engine::Swapchain::create(uint32_t width, uint32_t height)
 
 	_swapchainExtent = vkbSwapchain.extent;
 
-	// store swapchain and its related images
+	// store swapchain, its related images and their semaphores for sync
 	_swapchain = vkbSwapchain.swapchain;
 	_swapchainImages = vkbSwapchain.get_images().value();
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
+	_renderSemaphores = std::vector<VkSemaphore>(numberOfImages());
 
 	ENGINE_LOG_TRACE("Vulkan Swapchain creation went fine");
 }
@@ -53,4 +54,9 @@ void srtv_engine::Swapchain::destroy()
 
 		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
 	}
+}
+
+void srtv_engine::Swapchain::getNextImage(VkSemaphore acquireImageSemaphore, uint32_t *swapchainImageIndex)
+{
+	vkAcquireNextImageKHR(_device, _swapchain, 1000000000, acquireImageSemaphore, nullptr, swapchainImageIndex);
 }

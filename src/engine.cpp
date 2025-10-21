@@ -2,6 +2,7 @@
 
 #include "error_checker.h"
 #include "engine_logger.h"
+#include "image.h"
 
 #include <SDL3/SDL_vulkan.h>
 #include <fmt/core.h>
@@ -19,7 +20,7 @@ void Engine::init()
 
 	initSwapchain();
 
-	init_commands();
+	initCommands();
 
 	initSyncStructures();
 
@@ -160,6 +161,9 @@ void Engine::run()
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			continue;
 		}
+		else {
+			draw();
+		}
 	}
 }
 
@@ -170,8 +174,15 @@ void Engine::cleanup()
 		//make sure the gpu has stopped doing its things
 		vkDeviceWaitIdle(_device);
 
-		for (int i = 0; i < FRAME_OVERLAP; i++) {
-			vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
+		for (auto& frame : _frames) {
+			vkDestroyCommandPool(_device, frame._commandPool, nullptr);
+
+			vkDestroyFence(_device, frame._renderFence, nullptr);
+			vkDestroySemaphore(_device, frame._acquireImageSemaphore, nullptr);
+		}
+
+		for (auto& semaphore : _swapchain.getRenderSemaphores()) {
+			vkDestroySemaphore(_device, semaphore, nullptr);
 		}
 
 		destroySwapchain();
@@ -238,7 +249,7 @@ void Engine::destroySwapchain()
 	_swapchain.destroy();
 }
 
-void Engine::init_commands()
+void Engine::initCommands()
 {
 	// create a command pool for commands submitted to the graphics queue
 	// we also want to reset individual command buffers if they are coming from the frames command pool
@@ -255,7 +266,7 @@ void Engine::init_commands()
 
 	ENGINE_LOG_TRACE("Building Vulkan Commands (double buffering)...");
 
-	for (auto frame : _frames) {
+	for (auto& frame : _frames) {
 		CHECK_VK_FATAL_ERROR(vkCreateCommandPool(
 			_device,
 			&commandPoolCreateInfo,
@@ -282,10 +293,16 @@ void Engine::init_commands()
 
 void Engine::initSyncStructures()
 {
-	// create semaphores and fences for our frames
+	// create semaphores and fences for our frames (number of frames in flight)
 	// 1 fence to control when the gpu has finished rendering the frame
-	// 2 semaphores to syncronize rendering with swapchain
+	// 1 semaphores to syncronize rendering with swapchain
 	// we want the fence to start signalled so we don't wait on it on the first frame
+
+	// also create one semaphore per swapchain images to synchronize queues submit
+	// this is because when we signal this semaphore on a queue submit, the presentation can happen and the fence is signaled, so the CPU can continue and draw the next frame
+	// but NOTHING guarantees that the presentation is finished when we acquire the next image from our swapchain
+	// this means that the next queue submit can use ressources that are still used by the precedent frame's presentation operation (like the pWaitSemaphores)
+	// by allocating rendering semaphores based on the number of frames in the swapchain, and not the number of frames in flight, we can avoid this issue
 
 	VkFenceCreateInfo fenceCreateInfo = {};
 	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -297,12 +314,138 @@ void Engine::initSyncStructures()
 	semaphoreCreateInfo.pNext = nullptr;
 	semaphoreCreateInfo.flags = 0;
 
-	for (auto frame : _frames) {
-		vkCreateFence(_device, &fenceCreateInfo, nullptr, &frame._renderFence);
+	for (auto& frame : _frames) {
+		CHECK_VK_FATAL_ERROR(vkCreateFence(_device,
+			&fenceCreateInfo,
+			nullptr,
+			&frame._renderFence));
 
-		vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &frame._acquireImageSemaphore);
-		vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &frame._renderSemaphore);
+		CHECK_VK_FATAL_ERROR(vkCreateSemaphore(
+			_device,
+			&semaphoreCreateInfo,
+			nullptr,
+			&frame._acquireImageSemaphore));
 	}
+
+	for (auto& semaphore : _swapchain.getRenderSemaphores()) {
+		CHECK_VK_FATAL_ERROR(vkCreateSemaphore(
+			_device,
+			&semaphoreCreateInfo,
+			nullptr,
+			&semaphore));
+	}
+}
+
+void Engine::draw()
+{
+	// wait for precedent frame to be drawn (1 second timeout)
+	CHECK_VK_ERROR(vkWaitForFences(_device, 1, &getCurrentFrame()._renderFence, true, 1000000000));
+	CHECK_VK_ERROR(vkResetFences(_device, 1, &getCurrentFrame()._renderFence));
+
+	// acquire next image (by index) from the swapchain (1 second timeout)
+	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations
+	// the semaphore will be signaled when we can use the image
+	uint32_t swapchainImageIndex;
+	_swapchain.getNextImage(getCurrentFrame()._acquireImageSemaphore, &swapchainImageIndex);
+
+	// retrieve the render semaphore corresponding to the swapchain image we retrieved
+	VkSemaphore renderSemaphore = _swapchain.getRenderSemaphores()[swapchainImageIndex];
+
+	// commands recording with command buffer
+
+	VkCommandBuffer commandBuffer = getCurrentFrame()._commandBuffer;
+
+	// reset the command buffer to begin recording again (fence usage makes this operation safe because the precedent frame was drawn)
+	CHECK_VK_ERROR(vkResetCommandBuffer(commandBuffer, 0));
+
+	// we will use this command buffer only once, so we set this flag in the creation info
+	VkCommandBufferBeginInfo commandBufferBeginInfo = {};
+	commandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	commandBufferBeginInfo.pNext = nullptr;
+	commandBufferBeginInfo.pInheritanceInfo = nullptr;
+	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	// begin command buffer recording
+	CHECK_VK_ERROR(vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo));
+
+	// commands that we record in the buffer
+
+	// make the swapchain image into writeable mode before rendering
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+	// make a clear-color from frame number. This will flash every frame.
+	VkClearColorValue clearValue;
+	clearValue = { { 0.0f, 0.0f, float(_frameNumber), 1.0f } };
+
+	VkImageSubresourceRange clearRange = image::createImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+	// clear image
+	vkCmdClearColorImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+	// make the swapchain image into presentable mode
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+	// end the command buffer (can't add commands to it, but it can now be executed)
+	CHECK_VK_ERROR(vkEndCommandBuffer(commandBuffer));
+
+	// submit to queue
+
+	// we want to wait on the _acquireImageSemaphore, because that semaphore is signaled when the swapchain gave us an image to draw onto
+	// we also want to signal the renderSemaphore when submitted queue operations (placed in the defined command buffer) have completed execution
+	VkCommandBufferSubmitInfo commandBufferSubmitInfo = {};
+	commandBufferSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+	commandBufferSubmitInfo.pNext = nullptr;
+	commandBufferSubmitInfo.commandBuffer = commandBuffer;
+	commandBufferSubmitInfo.deviceMask = 0;
+
+	VkSemaphoreSubmitInfo waitSemaphoresInfo = {};
+	waitSemaphoresInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+	waitSemaphoresInfo.pNext = nullptr;
+	waitSemaphoresInfo.semaphore = getCurrentFrame()._acquireImageSemaphore;
+	waitSemaphoresInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR;
+	waitSemaphoresInfo.deviceIndex = 0;
+	waitSemaphoresInfo.value = 1;
+
+	VkSemaphoreSubmitInfo signalSemaphoresInfo = {};
+	signalSemaphoresInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+	signalSemaphoresInfo.pNext = nullptr;
+	signalSemaphoresInfo.semaphore = renderSemaphore;
+	signalSemaphoresInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+	signalSemaphoresInfo.deviceIndex = 0;
+	signalSemaphoresInfo.value = 1;
+
+	VkSubmitInfo2 submitInfo = {};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+	submitInfo.pNext = nullptr;
+	submitInfo.pCommandBufferInfos = &commandBufferSubmitInfo;
+	submitInfo.commandBufferInfoCount = 1;
+	submitInfo.pWaitSemaphoreInfos = &waitSemaphoresInfo;
+	submitInfo.waitSemaphoreInfoCount = 1;
+	submitInfo.pSignalSemaphoreInfos = &signalSemaphoresInfo;
+	submitInfo.signalSemaphoreInfoCount = 1;
+
+	// submit command buffer to the queue and execute it
+	// once the commands registered in the buffer finish execution, _renderFence will be signaled and the next draw() can proceed
+	CHECK_VK_ERROR(vkQueueSubmit2(_graphicsQueue, 1, &submitInfo, getCurrentFrame()._renderFence));
+
+	// present swapchain image
+
+	// put the image we drawed onto into the window
+	// we want to wait on the renderSemaphore, 
+	// because it is necessary that drawing commands have finished before the image is displayed to the user
+	VkPresentInfoKHR presentInfo = {};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	presentInfo.pNext = nullptr;
+	presentInfo.pSwapchains = _swapchain.getSwapchain();
+	presentInfo.swapchainCount = 1;
+	presentInfo.pWaitSemaphores = &renderSemaphore;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pImageIndices = &swapchainImageIndex;
+
+	CHECK_VK_ERROR(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+
+	// update the number of frame
+	_frameNumber = (_frameNumber+1) % FRAME_OVERLAP;
 }
 
 } // namespace srtv_engine

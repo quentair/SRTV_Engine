@@ -12,7 +12,7 @@
 
 namespace srtv_engine
 {
-constexpr unsigned int FRAME_OVERLAP = 2;
+	constexpr unsigned int FRAME_OVERLAP = 2;
 
 class Engine {
 
@@ -63,10 +63,10 @@ public:
 	// frame
 	FrameData _frames[FRAME_OVERLAP];
 	int _frameNumber{ 0 };
-	FrameData& getCurrentFrame() { return _frames[_frameNumber % FRAME_OVERLAP]; }
+	FrameData& getCurrentFrame() { return _frames[_frameNumber]; }
 
 	// commands
-	void init_commands();
+	void initCommands();
 
 	// queue
 	VkQueue _graphicsQueue;
@@ -74,6 +74,9 @@ public:
 
 	// synchronisation structures
 	void initSyncStructures();
+
+	// rendering
+	void draw();
 };
 
 } // namespace srtv_engine

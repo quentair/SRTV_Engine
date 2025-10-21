@@ -22,6 +22,10 @@ add_executable(SRTVEngine
 	${INCLUDE_DIR}/swapchain.h
 
 	${INCLUDE_DIR}/frame_data.h
+
+	image.cpp
+	${INCLUDE_DIR}/image.h
+
 	)
 
 ## add include files
