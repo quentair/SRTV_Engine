@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include <fmt/color.h>
 
 #include <string>

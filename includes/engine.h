@@ -2,6 +2,7 @@
 
 #include "frame_data.h"
 #include "swapchain.h"
+#include "resource_manager.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -59,6 +60,10 @@ public:
 	void initSwapchain();
 	void resizeSwapchain();
 	void destroySwapchain();
+
+	// resource manager
+	ResourceManager _mainResourceManager;
+	void initResourceManager();
 
 	// frame
 	FrameData _frames[FRAME_OVERLAP];

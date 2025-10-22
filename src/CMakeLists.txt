@@ -18,6 +18,11 @@ add_executable(SRTVEngine
 	engine_logger.cpp
 	${INCLUDE_DIR}/engine_logger.h
 
+	vma_usage.cpp
+
+	resource_manager.cpp
+	${INCLUDE_DIR}/resource_manager.h
+
 	swapchain.cpp
 	${INCLUDE_DIR}/swapchain.h
 

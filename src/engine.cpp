@@ -5,6 +5,7 @@
 #include "image.h"
 
 #include <SDL3/SDL_vulkan.h>
+
 #include <fmt/core.h>
 
 #include <thread>
@@ -19,6 +20,8 @@ void Engine::init()
 	initVulkan();
 
 	initSwapchain();
+
+	initResourceManager();
 
 	initCommands();
 
@@ -179,11 +182,17 @@ void Engine::cleanup()
 
 			vkDestroyFence(_device, frame._renderFence, nullptr);
 			vkDestroySemaphore(_device, frame._acquireImageSemaphore, nullptr);
+
+			// flush and destroy the frame-bound resources
+			frame._frameResourceManager.destroy();
 		}
 
 		for (auto& semaphore : _swapchain.getRenderSemaphores()) {
 			vkDestroySemaphore(_device, semaphore, nullptr);
 		}
+
+		// flush and destroy the global resources
+		_mainResourceManager.destroy();
 
 		destroySwapchain();
 
@@ -249,6 +258,15 @@ void Engine::destroySwapchain()
 	_swapchain.destroy();
 }
 
+void Engine::initResourceManager()
+{
+	_mainResourceManager.init(_instance, _chosenGPU, _device);
+
+	for (auto& frame : _frames) {
+		frame._frameResourceManager.init(_instance, _chosenGPU, _device);
+	}
+}
+
 void Engine::initCommands()
 {
 	// create a command pool for commands submitted to the graphics queue
@@ -298,11 +316,15 @@ void Engine::initSyncStructures()
 	// 1 semaphores to syncronize rendering with swapchain
 	// we want the fence to start signalled so we don't wait on it on the first frame
 
-	// also create one semaphore per swapchain images to synchronize queues submit
-	// this is because when we signal this semaphore on a queue submit, the presentation can happen and the fence is signaled, so the CPU can continue and draw the next frame
+	// also create one render semaphore per swapchain images to synchronize queues submit
+	// when we signal this render semaphore on a queue submit, the presentation can happen and the fence is signaled, so the CPU can continue and draw the next frame
 	// but NOTHING guarantees that the presentation is finished when we acquire the next image from our swapchain
 	// this means that the next queue submit can use ressources that are still used by the precedent frame's presentation operation (like the pWaitSemaphores)
+	// because by indexing rendering semaphores only by the index of frame in flight, we assume wich render semaphore we will use before actually getting the corresponding image from the swapchain
+	// ie : "I just submitted image in flight 0, so image in flight 1 render semaphore will be available"
+	// -> wrong because image in flight 1 render semaphore may still be used in presentation queue, and the image we acquired was using render semaphore from image in flight 0, but we take the one from image in flight 1 anyway, causing a bug
 	// by allocating rendering semaphores based on the number of frames in the swapchain, and not the number of frames in flight, we can avoid this issue
+	// so now we have : "I just submitted image in flight 0, so for image in flight 1, I grab the next available swapchain image, and because we aquired it, we can be sure that it has passed presentation operation and the render semaphore (and all ressources used by presentation) associated to it is truely available"
 
 	VkFenceCreateInfo fenceCreateInfo = {};
 	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -341,6 +363,8 @@ void Engine::draw()
 	// wait for precedent frame to be drawn (1 second timeout)
 	CHECK_VK_ERROR(vkWaitForFences(_device, 1, &getCurrentFrame()._renderFence, true, 1000000000));
 	CHECK_VK_ERROR(vkResetFences(_device, 1, &getCurrentFrame()._renderFence));
+
+	getCurrentFrame()._frameResourceManager.flush();
 
 	// acquire next image (by index) from the swapchain (1 second timeout)
 	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations

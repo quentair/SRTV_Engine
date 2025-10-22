@@ -58,5 +58,6 @@ void srtv_engine::Swapchain::destroy()
 
 void srtv_engine::Swapchain::getNextImage(VkSemaphore acquireImageSemaphore, uint32_t *swapchainImageIndex)
 {
+	// get next available image from the swapchain
 	vkAcquireNextImageKHR(_device, _swapchain, 1000000000, acquireImageSemaphore, nullptr, swapchainImageIndex);
 }
