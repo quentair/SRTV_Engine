@@ -2,7 +2,6 @@
 
 #include "error_checker.h"
 #include "engine_logger.h"
-#include "image.h"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -19,9 +18,11 @@ void Engine::init()
 
 	initVulkan();
 
+	initAllocator();
+
 	initSwapchain();
 
-	initResourceManager();
+	initDrawImage();
 
 	initCommands();
 
@@ -184,7 +185,7 @@ void Engine::cleanup()
 			vkDestroySemaphore(_device, frame._acquireImageSemaphore, nullptr);
 
 			// flush and destroy the frame-bound resources
-			frame._frameResourceManager.destroy();
+			frame._frameResourceDeletor.flush(_allocator, _device);
 		}
 
 		for (auto& semaphore : _swapchain.getRenderSemaphores()) {
@@ -192,7 +193,7 @@ void Engine::cleanup()
 		}
 
 		// flush and destroy the global resources
-		_mainResourceManager.destroy();
+		_mainResourceDeletor.flush(_allocator, _device);
 
 		destroySwapchain();
 
@@ -258,13 +259,20 @@ void Engine::destroySwapchain()
 	_swapchain.destroy();
 }
 
-void Engine::initResourceManager()
+void Engine::initAllocator()
 {
-	_mainResourceManager.init(_instance, _chosenGPU, _device);
+	ENGINE_LOG_TRACE("Building VMA allocator...");
 
-	for (auto& frame : _frames) {
-		frame._frameResourceManager.init(_instance, _chosenGPU, _device);
-	}
+	VmaAllocatorCreateInfo vmaAllocatorCreateInfo = {};
+	vmaAllocatorCreateInfo.instance = _instance;
+	vmaAllocatorCreateInfo.physicalDevice = _chosenGPU;
+	vmaAllocatorCreateInfo.device = _device;
+	vmaAllocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+	vmaAllocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+
+	CHECK_VK_FATAL_ERROR(vmaCreateAllocator(&vmaAllocatorCreateInfo, &_allocator));
+
+	ENGINE_LOG_TRACE("VMA allocator creation went fine");
 }
 
 void Engine::initCommands()
@@ -307,6 +315,48 @@ void Engine::initCommands()
 	}
 
 	ENGINE_LOG_TRACE("Vulkan Commands creation went fine");
+}
+
+void Engine::initDrawImage()
+{
+	ENGINE_LOG_TRACE("Allocate draw image with VMA...");
+
+	// draw image size will match the window
+	VkExtent3D drawImageExtent = {
+		_windowExtent.width,
+		_windowExtent.height,
+		1
+	};
+
+	// hardcoding the draw format to 32 bit float
+	_drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+	_drawImage.imageExtent = drawImageExtent;
+
+	VkImageUsageFlags drawImageUsages{};
+	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	//for the draw image, we want to allocate it from gpu local memory
+	VmaAllocationCreateInfo allocationInfo = {};
+	allocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	allocationInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	VkImageCreateInfo imageCreateInfo = image::defaultImageCreateInfo(_drawImage.imageFormat, drawImageUsages, _drawImage.imageExtent);
+
+	// allocate the draw image with VMA
+	CHECK_VK_FATAL_ERROR(vmaCreateImage(_allocator, &imageCreateInfo, &allocationInfo, &_drawImage.image, &_drawImage.allocation, nullptr));
+
+	// build a image-view for the new image to use for rendering
+	VkImageViewCreateInfo imageViewCreateInfo = image::defaultImageviewCreateInfo(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+	CHECK_VK_FATAL_ERROR(vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &_drawImage.imageView));
+
+	// register in main resource deletor
+	_mainResourceDeletor.registerImage(&_drawImage);
+
+	ENGINE_LOG_TRACE("Draw image allocation went fine");
 }
 
 void Engine::initSyncStructures()
@@ -364,7 +414,7 @@ void Engine::draw()
 	CHECK_VK_ERROR(vkWaitForFences(_device, 1, &getCurrentFrame()._renderFence, true, 1000000000));
 	CHECK_VK_ERROR(vkResetFences(_device, 1, &getCurrentFrame()._renderFence));
 
-	getCurrentFrame()._frameResourceManager.flush();
+	getCurrentFrame()._frameResourceDeletor.flush(_allocator, _device);
 
 	// acquire next image (by index) from the swapchain (1 second timeout)
 	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations
@@ -389,25 +439,30 @@ void Engine::draw()
 	commandBufferBeginInfo.pInheritanceInfo = nullptr;
 	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
+	_drawExtent.width = _drawImage.imageExtent.width;
+	_drawExtent.height = _drawImage.imageExtent.height;
+
 	// begin command buffer recording
 	CHECK_VK_ERROR(vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo));
 
 	// commands that we record in the buffer
 
-	// make the swapchain image into writeable mode before rendering
-	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	// transition our main draw image into general layout so we can write into it
+	// we will overwrite it all so we dont care about what was the older layout
+	image::transitionImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-	// make a clear-color from frame number. This will flash every frame.
-	VkClearColorValue clearValue;
-	clearValue = { { 0.0f, 0.0f, float(_frameNumber), 1.0f } };
+	// draw the background
+	drawBackground(commandBuffer);
 
-	VkImageSubresourceRange clearRange = image::createImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+	// transition the draw image and the swapchain image into their correct transfer layouts
+	image::transitionImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-	// clear image
-	vkCmdClearColorImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+	// execute a copy from the draw image into the swapchain
+	image::copyImageToImage(commandBuffer, _drawImage.image, _swapchain.getImageAt(swapchainImageIndex), _drawExtent, _swapchain.getExtent());
 
-	// make the swapchain image into presentable mode
-	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	// set swapchain image to present layout so we can show it on the screen
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	// end the command buffer (can't add commands to it, but it can now be executed)
 	CHECK_VK_ERROR(vkEndCommandBuffer(commandBuffer));
@@ -470,6 +525,19 @@ void Engine::draw()
 
 	// update the number of frame
 	_frameNumber = (_frameNumber+1) % FRAME_OVERLAP;
+}
+
+void Engine::drawBackground(VkCommandBuffer commandBuffer)
+{
+	//make a clear-color from frame number. This will flash every frame
+	VkClearColorValue clearValue;
+	float flash = std::abs(std::sin(_frameNumber));
+	clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
+
+	VkImageSubresourceRange clearRange = image::createDefaultImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+	//clear image
+	vkCmdClearColorImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 }
 
 } // namespace srtv_engine

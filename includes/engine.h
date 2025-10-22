@@ -2,7 +2,8 @@
 
 #include "frame_data.h"
 #include "swapchain.h"
-#include "resource_manager.h"
+#include "resource_deletor.h"
+#include "image.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -61,9 +62,12 @@ public:
 	void resizeSwapchain();
 	void destroySwapchain();
 
-	// resource manager
-	ResourceManager _mainResourceManager;
-	void initResourceManager();
+	// resource allocation
+	VmaAllocator _allocator;
+	void initAllocator();
+
+	// resource deletion
+	ResourceDeletor _mainResourceDeletor;
 
 	// frame
 	FrameData _frames[FRAME_OVERLAP];
@@ -76,12 +80,19 @@ public:
 	// queue
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
+	void initDrawImage();
 
 	// synchronisation structures
 	void initSyncStructures();
 
+	// rendering resources
+	VkExtent2D _drawExtent;
+	image::AllocatedImage _drawImage;
+
 	// rendering
 	void draw();
+
+	void drawBackground(VkCommandBuffer commandBuffer);
 };
 
 } // namespace srtv_engine

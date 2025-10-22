@@ -20,8 +20,8 @@ add_executable(SRTVEngine
 
 	vma_usage.cpp
 
-	resource_manager.cpp
-	${INCLUDE_DIR}/resource_manager.h
+	resource_deletor.cpp
+	${INCLUDE_DIR}/resource_deletor.h
 
 	swapchain.cpp
 	${INCLUDE_DIR}/swapchain.h

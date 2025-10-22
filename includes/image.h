@@ -13,7 +13,14 @@ namespace srtv_engine::image {
         VkFormat imageFormat;
     };
 
+    VkImageCreateInfo defaultImageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
+
+    VkImageViewCreateInfo defaultImageviewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
+
 	void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 
-	VkImageSubresourceRange createImageSubresourceRange(VkImageAspectFlags aspectMask);
+	VkImageSubresourceRange createDefaultImageSubresourceRange(VkImageAspectFlags aspectMask);
+
+    void copyImageToImage(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize);
+
 } // namespace srtv_engine::image

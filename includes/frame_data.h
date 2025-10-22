@@ -1,6 +1,6 @@
 #pragma once
 
-#include "resource_manager.h"
+#include "resource_deletor.h"
 
 #include <vulkan/vulkan.h>
 
@@ -14,7 +14,7 @@ class FrameData {
 	VkSemaphore _acquireImageSemaphore;
 	VkFence _renderFence;
 
-	ResourceManager _frameResourceManager;
+	ResourceDeletor _frameResourceDeletor;
 };
 
 } // namespace srtv_engine

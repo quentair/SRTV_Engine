@@ -1,8 +1,6 @@
 #include "engine.h"
 #include "engine_logger.h"
 
-#include <iostream>
-
 int main(int argc, char* argv[]) {
 
 	srtv_engine::EngineLogger::init();
