@@ -31,6 +31,9 @@ add_executable(SRTVEngine
 	image.cpp
 	${INCLUDE_DIR}/image.h
 
+	descriptor.cpp
+	${INCLUDE_DIR}/descriptor.h
+
 	)
 
 ## add include files

@@ -1,8 +1,5 @@
 #include "resource_deletor.h"
 
-#include "error_checker.h"
-#include "engine_logger.h"
-
 namespace srtv_engine {
 
 void ResourceDeletor::flush(VmaAllocator allocator, VkDevice device)
