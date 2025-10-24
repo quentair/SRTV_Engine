@@ -2,6 +2,7 @@
 
 #include "error_checker.h"
 #include "engine_logger.h"
+#include "pipeline.h"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -29,6 +30,8 @@ void Engine::init()
 	initSyncStructures();
 
 	initDescriptors();
+
+	initPipelines();
 
 	_isInitialized = true;
 }
@@ -573,6 +576,15 @@ void Engine::initDescriptors()
 	// register global descriptor pool and drawImage descriptor layout for further deletion
 	_mainResourceDeletor.registerDescriptorAllocatorGrowble(&_globalDescriptorAllocator);
 	_mainResourceDeletor.registerDescriptorSetLayout(&_drawImageDescriptorSetLayout);
+}
+
+void Engine::initPipelines()
+{
+	initBackgroundPipelines();
+}
+
+void Engine::initBackgroundPipelines()
+{
 }
 
 } // namespace srtv_engine

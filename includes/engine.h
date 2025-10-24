@@ -99,6 +99,12 @@ public:
 	VkDescriptorSetLayout _drawImageDescriptorSetLayout;
 	VkDescriptorSet _drawImageDescriptorSet;
 	void initDescriptors();
+
+	// pipelines
+	VkPipeline _gradientPipeline;
+	VkPipelineLayout _gradientPipelineLayout;
+	void initPipelines();
+	void initBackgroundPipelines();
 };
 
 } // namespace srtv_engine

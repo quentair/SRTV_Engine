@@ -65,13 +65,13 @@ void DescriptorAllocatorGrowable::clearPools(VkDevice device)
     // reset all pools
 
     for (auto p : _readyPools) {
-        vkResetDescriptorPool(device, p, 0);
+        CHECK_VK_ERROR(vkResetDescriptorPool(device, p, 0));
     }
 
     // all full pools are reset and so becomes ready to use again 
     // need also a clear this time because we are doing a copy with push back, and there is technically no more full pools
     for (auto pool : _fullPools) {
-        vkResetDescriptorPool(device, pool, 0);
+        CHECK_VK_ERROR(vkResetDescriptorPool(device, pool, 0));
         _readyPools.push_back(pool);
     }
     _fullPools.clear();
@@ -171,7 +171,7 @@ VkDescriptorPool DescriptorAllocatorGrowable::createPool(VkDevice device, uint32
     pool_info.pPoolSizes = descriptorPoolSizes.data();
 
     VkDescriptorPool newPool;
-    vkCreateDescriptorPool(device, &pool_info, nullptr, &newPool);
+    CHECK_VK_ERROR(vkCreateDescriptorPool(device, &pool_info, nullptr, &newPool));
 
     return newPool;
 }

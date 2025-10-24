@@ -34,6 +34,11 @@ add_executable(SRTVEngine
 	descriptor.cpp
 	${INCLUDE_DIR}/descriptor.h
 
+	pipeline.cpp
+	${INCLUDE_DIR}/pipeline.h
+
+	shader.cpp
+	${INCLUDE_DIR}/shader.h
 	)
 
 ## add include files
