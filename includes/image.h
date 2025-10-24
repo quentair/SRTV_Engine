@@ -5,12 +5,13 @@
 
 namespace srtv_engine::image {
 
-    struct AllocatedImage {
-        VkImage image;
-        VkImageView imageView;
-        VmaAllocation allocation;
-        VkExtent3D imageExtent;
-        VkFormat imageFormat;
+    class AllocatedImage {
+      public :
+        VkImage _image;
+        VkImageView _imageView;
+        VmaAllocation _allocation;
+        VkExtent3D _imageExtent;
+        VkFormat _imageFormat;
     };
 
     VkImageCreateInfo defaultImageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);

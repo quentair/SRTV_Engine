@@ -10,15 +10,15 @@ namespace srtv_engine {
 
 class PoolSizeRatio {
   public:
-	VkDescriptorType type;
-	float ratio;
+	VkDescriptorType _type;
+	uint32_t _ratio;
 };
 
-class DescriptorLayoutbuilder {
+class DescriptorLayoutBuilder {
   public:
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    std::vector<VkDescriptorSetLayoutBinding> _bindings;
 
-    void add_binding(uint32_t binding, VkDescriptorType type);
+    void addBinding(uint32_t binding, VkDescriptorType type);
     void clear();
     VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages, void* pNext = nullptr, VkDescriptorSetLayoutCreateFlags flags = 0);
 };
@@ -29,33 +29,33 @@ class DescriptorAllocatorGrowable {
 public:
 
 	void init(VkDevice device, uint32_t initialSetsCount, std::span<PoolSizeRatio> poolRatios);
-	void clear_pools(VkDevice device);
-	void destroy_pools(VkDevice device);
+	void clearPools(VkDevice device);
+	void destroyPools(VkDevice device);
 
 	VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout, void* pNext = nullptr);
 private:
-	VkDescriptorPool get_pool(VkDevice device);
-	VkDescriptorPool create_pool(VkDevice device, uint32_t descriptorSetCount, std::span<PoolSizeRatio> poolRatios);
+	VkDescriptorPool getPool(VkDevice device);
+	VkDescriptorPool createPool(VkDevice device, uint32_t descriptorSetCount, std::span<PoolSizeRatio> poolRatios);
 
-	std::vector<PoolSizeRatio> ratios;
-	std::vector<VkDescriptorPool> fullPools; // pools we can't no more allocate from (full pools)
-	std::vector<VkDescriptorPool> readyPools; // pools that can still be used (available pools)
-	uint32_t setsPerPool; // controls how many VkDescriptorSets we can create from the pool in total
+	std::vector<PoolSizeRatio> _ratios;
+	std::vector<VkDescriptorPool> _fullPools; // pools we can't no more allocate from (full pools)
+	std::vector<VkDescriptorPool> _readyPools; // pools that can still be used (available pools)
+	uint32_t _setsPerPool; // controls how many VkDescriptorSets we can create from the pool in total
 
 };
 
 class DescriptorWriter {
   public:
 	// use deque containers because they don't invalidate references to elements in them when doing emplace, push, resize and erase operations
-	std::deque<VkDescriptorImageInfo> imageInfos;
-	std::deque<VkDescriptorBufferInfo> bufferInfos;
-	std::vector<VkWriteDescriptorSet> writes;
+	std::deque<VkDescriptorImageInfo> _imageInfos;
+	std::deque<VkDescriptorBufferInfo> _bufferInfos;
+	std::vector<VkWriteDescriptorSet> _writes;
 
-	void write_image(int binding, VkImageView imageView, VkSampler sampler, VkImageLayout layout, VkDescriptorType type);
-	void write_buffer(int binding, VkBuffer buffer, size_t size, size_t offset, VkDescriptorType type);
+	void writeImage(int binding, VkImageView imageView, VkSampler sampler, VkImageLayout layout, VkDescriptorType type);
+	void writeBuffer(int binding, VkBuffer buffer, size_t size, size_t offset, VkDescriptorType type);
 
 	void clear();
-	void update_set(VkDevice device, VkDescriptorSet set);
+	void updateSet(VkDevice device, VkDescriptorSet set);
 };
 
 } // namespace srtv_engine

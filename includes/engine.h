@@ -4,6 +4,7 @@
 #include "swapchain.h"
 #include "resource_deletor.h"
 #include "image.h"
+#include "descriptor.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -91,8 +92,13 @@ public:
 
 	// rendering
 	void draw();
-
 	void drawBackground(VkCommandBuffer commandBuffer);
+
+	// descriptors
+	DescriptorAllocatorGrowable _globalDescriptorAllocator;
+	VkDescriptorSetLayout _drawImageDescriptorSetLayout;
+	VkDescriptorSet _drawImageDescriptorSet;
+	void initDescriptors();
 };
 
 } // namespace srtv_engine

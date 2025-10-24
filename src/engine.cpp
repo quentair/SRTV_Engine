@@ -28,6 +28,8 @@ void Engine::init()
 
 	initSyncStructures();
 
+	initDescriptors();
+
 	_isInitialized = true;
 }
 
@@ -329,8 +331,8 @@ void Engine::initDrawImage()
 	};
 
 	// hardcoding the draw format to 32 bit float
-	_drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-	_drawImage.imageExtent = drawImageExtent;
+	_drawImage._imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+	_drawImage._imageExtent = drawImageExtent;
 
 	VkImageUsageFlags drawImageUsages{};
 	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -343,15 +345,15 @@ void Engine::initDrawImage()
 	allocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 	allocationInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-	VkImageCreateInfo imageCreateInfo = image::defaultImageCreateInfo(_drawImage.imageFormat, drawImageUsages, _drawImage.imageExtent);
+	VkImageCreateInfo imageCreateInfo = image::defaultImageCreateInfo(_drawImage._imageFormat, drawImageUsages, _drawImage._imageExtent);
 
 	// allocate the draw image with VMA
-	CHECK_VK_FATAL_ERROR(vmaCreateImage(_allocator, &imageCreateInfo, &allocationInfo, &_drawImage.image, &_drawImage.allocation, nullptr));
+	CHECK_VK_FATAL_ERROR(vmaCreateImage(_allocator, &imageCreateInfo, &allocationInfo, &_drawImage._image, &_drawImage._allocation, nullptr));
 
 	// build a image-view for the new image to use for rendering
-	VkImageViewCreateInfo imageViewCreateInfo = image::defaultImageviewCreateInfo(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+	VkImageViewCreateInfo imageViewCreateInfo = image::defaultImageviewCreateInfo(_drawImage._imageFormat, _drawImage._image, VK_IMAGE_ASPECT_COLOR_BIT);
 
-	CHECK_VK_FATAL_ERROR(vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &_drawImage.imageView));
+	CHECK_VK_FATAL_ERROR(vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &_drawImage._imageView));
 
 	// register in main resource deletor
 	_mainResourceDeletor.registerImage(&_drawImage);
@@ -439,8 +441,8 @@ void Engine::draw()
 	commandBufferBeginInfo.pInheritanceInfo = nullptr;
 	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-	_drawExtent.width = _drawImage.imageExtent.width;
-	_drawExtent.height = _drawImage.imageExtent.height;
+	_drawExtent.width = _drawImage._imageExtent.width;
+	_drawExtent.height = _drawImage._imageExtent.height;
 
 	// begin command buffer recording
 	CHECK_VK_ERROR(vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo));
@@ -449,17 +451,17 @@ void Engine::draw()
 
 	// transition our main draw image into general layout so we can write into it
 	// we will overwrite it all so we dont care about what was the older layout
-	image::transitionImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	image::transitionImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
 	// draw the background
 	drawBackground(commandBuffer);
 
 	// transition the draw image and the swapchain image into their correct transfer layouts
-	image::transitionImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	image::transitionImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	// execute a copy from the draw image into the swapchain
-	image::copyImageToImage(commandBuffer, _drawImage.image, _swapchain.getImageAt(swapchainImageIndex), _drawExtent, _swapchain.getExtent());
+	image::copyImageToImage(commandBuffer, _drawImage._image, _swapchain.getImageAt(swapchainImageIndex), _drawExtent, _swapchain.getExtent());
 
 	// set swapchain image to present layout so we can show it on the screen
 	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -537,7 +539,40 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	VkImageSubresourceRange clearRange = image::createDefaultImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
 	//clear image
-	vkCmdClearColorImage(commandBuffer, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+	vkCmdClearColorImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+}
+
+void Engine::initDescriptors()
+{
+	// first, create a descriptor pool
+	
+	// our descriptor pool can allocate up to (ratios * number of sets) of each descriptor type (here, 1 * number of sets storage image)
+	std::vector<PoolSizeRatio> ratios = {
+		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}
+	};
+
+	// our descriptor pool can allocate up to 10 sets (so 10 storage image in total)
+	_globalDescriptorAllocator.init(_device, 10, ratios);
+
+	// create the descriptor set layout for our compute draw (it needs to reflect our pool, so only storage image)
+	{
+		DescriptorLayoutBuilder builder;
+		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // at binding 0 in the shader, we must have a storage image
+		_drawImageDescriptorSetLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT); // the layout is made for compute shader stage
+	}
+	// with a layout of 1 storage image binding, we can allocate up to 10 sets from our pool
+
+	// allocate a descriptor set from our pool following our descriptor set layout
+	_drawImageDescriptorSet = _globalDescriptorAllocator.allocate(_device, _drawImageDescriptorSetLayout);
+
+	// bind our draw image to the descriptor set (the image must a storage image situated in the GENERAL layout)
+	DescriptorWriter writer;
+	writer.writeImage(0, _drawImage._imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+	writer.updateSet(_device, _drawImageDescriptorSet);
+
+	// register global descriptor pool and drawImage descriptor layout for further deletion
+	_mainResourceDeletor.registerDescriptorAllocatorGrowble(&_globalDescriptorAllocator);
+	_mainResourceDeletor.registerDescriptorSetLayout(&_drawImageDescriptorSetLayout);
 }
 
 } // namespace srtv_engine

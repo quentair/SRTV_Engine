@@ -1,6 +1,7 @@
 #pragma once
 
 #include "image.h"
+#include "descriptor.h"
 
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
@@ -19,6 +20,10 @@ class ResourceDeletor {
 
 	void registerImage(image::AllocatedImage* allocatedImage);
 
+	void registerDescriptorAllocatorGrowble(DescriptorAllocatorGrowable* descriptorAllocator);
+
+	void registerDescriptorSetLayout(VkDescriptorSetLayout* descriptorSetLayout);
+
   private:
 
 	// delete copy constructor and copy assignment operator
@@ -26,6 +31,10 @@ class ResourceDeletor {
 	ResourceDeletor& operator= (const ResourceDeletor&) = delete;
 
 	std::vector<image::AllocatedImage*> _allocatedImages;
+
+	std::vector<DescriptorAllocatorGrowable*> _descriptorAllocators;
+
+	std::vector<VkDescriptorSetLayout*> _descriptorSetLayouts;
 };
 
 } // namespace srtv_engine
