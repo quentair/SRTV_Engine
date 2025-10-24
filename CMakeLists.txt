@@ -20,7 +20,7 @@ add_subdirectory(src)
 
 # find glslangValidator to use it for shader file compilation with custom command
 
-find_program (GLSLANG_VALIDATOR "glslangValidator" HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
+find_program (GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 
 # Generate a list of files that match the globbing-expressions (here, all shader files in "shaders" directory) and store it into the variable GLSL_SOURCE_FILE
 # The GLOB_RECURSE mode will traverse all the subdirectories of the matched directory and match the files
@@ -35,20 +35,22 @@ file(GLOB_RECURSE GLSL_SOURCE_FILES CONFIGURE_DEPENDS
 
 foreach(GLSL_FILE ${GLSL_SOURCE_FILES})
 	message(STATUS "BUILDING SHADER")
-	
+
 	# format spv file
 	get_filename_component(GLSL_FILE_NAME ${GLSL_FILE} NAME)
 	set(SPIRV_FILE "${PROJECT_SOURCE_DIR}/shaders/${GLSL_FILE_NAME}.spv")
+
 	message(STATUS "BUILDING ${GLSL_FILE_NAME}")
+	message(STATUS COMMAND ${GLSL_VALIDATOR} -V ${GLSL_FILE} -o ${SPIRV_FILE})
 	
 	# building command (glslangvalidator -V shaders/shader.vert -o shaders/shader.vert.spv)
 	add_custom_command(
 		OUTPUT ${SPIRV_FILE}
-		COMMAND ${GLSLANG_VALIDATOR} -V ${GLSL_FILE} -o {SPIRV_FILE}
+		COMMAND ${GLSLANG_VALIDATOR} -V ${GLSL_FILE} -o ${SPIRV_FILE}
 		DEPENDS ${GLSL_FILE}
 	)
 	list(APPEND SPIRV_BINARY_FILES ${SPIRV_FILE})
-endforeach()
+endforeach(GLSL_FILE)
 
 # add shader building command as a new building target
 # it will execute the above custom command that create all the spir-v files from glsl files (because of DEPENDS keyword mentioning the previously created list)

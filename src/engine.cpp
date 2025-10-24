@@ -3,6 +3,7 @@
 #include "error_checker.h"
 #include "engine_logger.h"
 #include "pipeline.h"
+#include "shader.h"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -178,6 +179,9 @@ void Engine::run()
 
 void Engine::cleanup()
 {
+
+	ENGINE_LOG_TRACE("Cleanup engine...");
+
 	// destroy in reversed creation order
 	if (_isInitialized) {
 		//make sure the gpu has stopped doing its things
@@ -212,6 +216,8 @@ void Engine::cleanup()
 
 		SDL_DestroyWindow(_window);
 	}
+
+	ENGINE_LOG_TRACE("Engine cleanup went fine");
 }
 
 void Engine::createSdlWindow()
@@ -539,14 +545,25 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	float flash = std::abs(std::sin(_frameNumber));
 	clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
 
-	VkImageSubresourceRange clearRange = image::createDefaultImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+	//VkImageSubresourceRange clearRange = image::createDefaultImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
 
 	//clear image
-	vkCmdClearColorImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+	//vkCmdClearColorImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+	// bind the gradient drawing compute pipeline
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
+
+	// bind the descriptor set containing the draw image for the compute pipeline
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
+
+	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
+	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
 
 void Engine::initDescriptors()
 {
+	ENGINE_LOG_TRACE("Building Vulkan Descriptor Pool for the compute stage...");
+
 	// first, create a descriptor pool
 	
 	// our descriptor pool can allocate up to (ratios * number of sets) of each descriptor type (here, 1 * number of sets storage image)
@@ -557,6 +574,10 @@ void Engine::initDescriptors()
 	// our descriptor pool can allocate up to 10 sets (so 10 storage image in total)
 	_globalDescriptorAllocator.init(_device, 10, ratios);
 
+	ENGINE_LOG_TRACE("Vulkan Descriptor Pool creation went fine");
+
+	ENGINE_LOG_TRACE("Building Vulkan Descriptor Layout for the compute stage...");
+
 	// create the descriptor set layout for our compute draw (it needs to reflect our pool, so only storage image)
 	{
 		DescriptorLayoutBuilder builder;
@@ -565,6 +586,10 @@ void Engine::initDescriptors()
 	}
 	// with a layout of 1 storage image binding, we can allocate up to 10 sets from our pool
 
+	ENGINE_LOG_TRACE("Vulkan Descriptor Layout creation went fine");
+
+	ENGINE_LOG_TRACE("Allocating and binding Vulkan Descriptor Set for the compute stage...");
+
 	// allocate a descriptor set from our pool following our descriptor set layout
 	_drawImageDescriptorSet = _globalDescriptorAllocator.allocate(_device, _drawImageDescriptorSetLayout);
 
@@ -572,6 +597,8 @@ void Engine::initDescriptors()
 	DescriptorWriter writer;
 	writer.writeImage(0, _drawImage._imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 	writer.updateSet(_device, _drawImageDescriptorSet);
+
+	ENGINE_LOG_TRACE("Vulkan Descriptor Set allocation and binding went fine");
 
 	// register global descriptor pool and drawImage descriptor layout for further deletion
 	_mainResourceDeletor.registerDescriptorAllocatorGrowble(&_globalDescriptorAllocator);
@@ -585,6 +612,51 @@ void Engine::initPipelines()
 
 void Engine::initBackgroundPipelines()
 {
+	ENGINE_LOG_TRACE("Building Vulkan Compute Pipeline...");
+
+	// create a pipeline layout for our compute stage draw
+
+	VkPipelineLayoutCreateInfo computePipelineLayoutCreateInfo = {};
+	computePipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	computePipelineLayoutCreateInfo.pNext = nullptr;
+	computePipelineLayoutCreateInfo.pSetLayouts = &_drawImageDescriptorSetLayout;
+	computePipelineLayoutCreateInfo.setLayoutCount = 1;
+
+	CHECK_VK_FATAL_ERROR(vkCreatePipelineLayout(_device, &computePipelineLayoutCreateInfo, nullptr, &_computePipelineLayout));
+
+	// load shader code
+
+	VkShaderModule computeDrawShader;
+	if (!loadShaderModule("../../shaders/gradient.comp.spv", _device, &computeDrawShader))
+	{
+		ENGINE_LOG_ERROR("Error when building the compute shader \n");
+	}
+
+	// create a pipeline for our compute stage draw
+
+	VkPipelineShaderStageCreateInfo shaderStageCreateInfo{};
+	shaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	shaderStageCreateInfo.pNext = nullptr;
+	shaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderStageCreateInfo.module = computeDrawShader;
+	shaderStageCreateInfo.pName = "main";
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.pNext = nullptr;
+	computePipelineCreateInfo.layout = _computePipelineLayout;
+	computePipelineCreateInfo.stage = shaderStageCreateInfo;
+
+	CHECK_VK_FATAL_ERROR(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &_computePipeline));
+
+	// once the pipeline is built, shaders can be safely destroyed
+	vkDestroyShaderModule(_device, computeDrawShader, nullptr);
+
+	// regiser pipeline layout and pipeline for further deletion (delete pipelin layout first, then the pipeline)
+	_mainResourceDeletor.registerPipelineLayout(&_computePipelineLayout);
+	_mainResourceDeletor.registerPipeline(&_computePipeline);
+
+	ENGINE_LOG_TRACE("Vulkan Compute Pipeline creation went fine");
 }
 
 } // namespace srtv_engine

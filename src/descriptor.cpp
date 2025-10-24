@@ -24,7 +24,7 @@ void DescriptorLayoutBuilder::clear()
     
 VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderStageFlags shaderStages, void* pNext, VkDescriptorSetLayoutCreateFlags flags)
 {
-    for (auto binding : _bindings) {
+    for (auto& binding : _bindings) {
         binding.stageFlags |= shaderStages;
     }
 
@@ -188,6 +188,7 @@ void DescriptorWriter::writeImage(int binding, VkImageView imageView, VkSampler 
 
     VkWriteDescriptorSet writeDescriptorSet = {};
     writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.pNext = nullptr;
     writeDescriptorSet.dstBinding = binding;
     writeDescriptorSet.dstSet = VK_NULL_HANDLE; // left empty for now until we need to write it
     writeDescriptorSet.descriptorCount = 1;

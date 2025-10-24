@@ -24,6 +24,10 @@ class ResourceDeletor {
 
 	void registerDescriptorSetLayout(VkDescriptorSetLayout* descriptorSetLayout);
 
+	void registerPipelineLayout(VkPipelineLayout* pipelineLayout);
+
+	void registerPipeline(VkPipeline* pipeline);
+
   private:
 
 	// delete copy constructor and copy assignment operator
@@ -35,6 +39,10 @@ class ResourceDeletor {
 	std::vector<DescriptorAllocatorGrowable*> _descriptorAllocators;
 
 	std::vector<VkDescriptorSetLayout*> _descriptorSetLayouts;
+
+	std::vector<VkPipelineLayout*> _pipelineLayouts;
+
+	std::vector<VkPipeline*> _pipelines;
 };
 
 } // namespace srtv_engine

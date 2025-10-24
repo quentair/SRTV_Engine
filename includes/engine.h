@@ -101,8 +101,8 @@ public:
 	void initDescriptors();
 
 	// pipelines
-	VkPipeline _gradientPipeline;
-	VkPipelineLayout _gradientPipelineLayout;
+	VkPipeline _computePipeline;
+	VkPipelineLayout _computePipelineLayout;
 	void initPipelines();
 	void initBackgroundPipelines();
 };

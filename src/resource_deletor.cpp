@@ -12,8 +12,15 @@ void ResourceDeletor::flush(VmaAllocator allocator, VkDevice device)
 	for (auto& descriptorAllocator : _descriptorAllocators) {
 		descriptorAllocator->destroyPools(device);
 	}
-	for (auto& descriptorSetayout : _descriptorSetLayouts) {
-		vkDestroyDescriptorSetLayout(device, *descriptorSetayout, nullptr);
+	for (auto& descriptorSetLayout : _descriptorSetLayouts) {
+		vkDestroyDescriptorSetLayout(device, *descriptorSetLayout, nullptr);
+	}
+	// destroy pipeline layout first, then pipeline
+	for (auto& pipelineLayout : _pipelineLayouts) {
+		vkDestroyPipelineLayout(device, *pipelineLayout, nullptr);
+	}
+	for (auto& pipeline : _pipelines) {
+		vkDestroyPipeline(device, *pipeline, nullptr);
 	}
 
 	_allocatedImages.clear();
@@ -35,6 +42,18 @@ void ResourceDeletor::registerDescriptorSetLayout(VkDescriptorSetLayout* descrip
 {
 	// register descriptor set layout for further deletion
 	_descriptorSetLayouts.push_back(descriptorSetLayout);
+}
+
+void ResourceDeletor::registerPipelineLayout(VkPipelineLayout* pipelineLayout)
+{
+	// register pipeline layout for further deletion
+	_pipelineLayouts.push_back(pipelineLayout);
+}
+
+void ResourceDeletor::registerPipeline(VkPipeline* pipeline)
+{
+	// register pipeline for further deletion
+	_pipelines.push_back(pipeline);
 }
 
 } // namespace srtv_engine
