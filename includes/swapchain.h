@@ -25,7 +25,7 @@ class Swapchain {
 
 	  void destroy();
 
-	  void getNextImage(VkSemaphore acquireImageSemaphore, uint32_t* swapchainImageIndex);
+	  VkResult getNextImage(VkSemaphore acquireImageSemaphore, uint32_t* swapchainImageIndex);
 
   private:
 
@@ -41,7 +41,10 @@ class Swapchain {
 	std::vector<VkImage> _swapchainImages;
 	std::vector<VkImageView> _swapchainImageViews;
 	VkExtent2D _swapchainExtent;
+
+	// semaphores
 	std::vector<VkSemaphore> _renderSemaphores;
+	void initSemaphores();
 };
 
 } // namespace srtv_engine

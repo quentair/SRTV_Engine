@@ -174,6 +174,11 @@ void Engine::run()
 		else {
 			draw();
 		}
+
+		if (_resize) {
+			ENGINE_LOG_TRACE("Resize window...");
+			resizeSwapchain();
+		}
 	}
 }
 
@@ -195,10 +200,6 @@ void Engine::cleanup()
 
 			// flush and destroy the frame-bound resources
 			frame._frameResourceDeletor.flush(_allocator, _device);
-		}
-
-		for (auto& semaphore : _swapchain.getRenderSemaphores()) {
-			vkDestroySemaphore(_device, semaphore, nullptr);
 		}
 
 		// flush and destroy the global resources
@@ -231,7 +232,7 @@ void Engine::createSdlWindow()
 	_window = SDL_CreateWindow("SRTV Engine",
 		_windowExtent.width,
 		_windowExtent.height,
-		SDL_WINDOW_VULKAN
+		SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE
 	);
 
 	if (!_window) {
@@ -251,6 +252,7 @@ void Engine::resizeSwapchain()
 {
 	// destroy out of date swapchain and create a new one with the right size
 
+	// wait for GPU to finish any ongoing operation
 	vkDeviceWaitIdle(_device);
 
 	destroySwapchain();
@@ -262,7 +264,7 @@ void Engine::resizeSwapchain()
 
 	_swapchain.create(_windowExtent.width, _windowExtent.height);
 
-	//resize_requested = false;
+	_resize = false;
 }
 
 void Engine::destroySwapchain()
@@ -387,6 +389,8 @@ void Engine::initSyncStructures()
 	// by allocating rendering semaphores based on the number of frames in the swapchain, and not the number of frames in flight, we can avoid this issue
 	// so now we have : "I just submitted image in flight 0, so for image in flight 1, I grab the next available swapchain image, and because we aquired it, we can be sure that it has passed presentation operation and the render semaphore (and all ressources used by presentation) associated to it is truely available"
 
+	ENGINE_LOG_TRACE("Building frame dependent semaphore and fence...");
+
 	VkFenceCreateInfo fenceCreateInfo = {};
 	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	fenceCreateInfo.pNext = nullptr;
@@ -410,13 +414,7 @@ void Engine::initSyncStructures()
 			&frame._acquireImageSemaphore));
 	}
 
-	for (auto& semaphore : _swapchain.getRenderSemaphores()) {
-		CHECK_VK_FATAL_ERROR(vkCreateSemaphore(
-			_device,
-			&semaphoreCreateInfo,
-			nullptr,
-			&semaphore));
-	}
+	ENGINE_LOG_TRACE("Frame dependent semaphore and fence creation went fine");
 }
 
 void Engine::draw()
@@ -431,7 +429,12 @@ void Engine::draw()
 	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations
 	// the semaphore will be signaled when we can use the image
 	uint32_t swapchainImageIndex;
-	_swapchain.getNextImage(getCurrentFrame()._acquireImageSemaphore, &swapchainImageIndex);
+	if (_swapchain.getNextImage(getCurrentFrame()._acquireImageSemaphore, &swapchainImageIndex) == VK_ERROR_OUT_OF_DATE_KHR) {
+		// the out of date error may signal that the window was resized
+		//  so we stop rendering and handle it
+		_resize = true;
+		return;
+	}
 
 	// retrieve the render semaphore corresponding to the swapchain image we retrieved
 	VkSemaphore renderSemaphore = _swapchain.getRenderSemaphores()[swapchainImageIndex];
@@ -450,8 +453,8 @@ void Engine::draw()
 	commandBufferBeginInfo.pInheritanceInfo = nullptr;
 	commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-	_drawExtent.width = _drawImage._imageExtent.width;
-	_drawExtent.height = _drawImage._imageExtent.height;
+	_drawExtent.width = std::min(_swapchain.getExtent().width, _drawImage._imageExtent.width) * _renderScale;
+	_drawExtent.height = std::min(_swapchain.getExtent().height, _drawImage._imageExtent.height) * _renderScale;
 
 	// begin command buffer recording
 	CHECK_VK_ERROR(vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo));
@@ -532,7 +535,13 @@ void Engine::draw()
 	presentInfo.waitSemaphoreCount = 1;
 	presentInfo.pImageIndices = &swapchainImageIndex;
 
-	CHECK_VK_ERROR(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+	auto presentResult = vkQueuePresentKHR(_graphicsQueue, &presentInfo);
+	CHECK_VK_ERROR(presentResult);
+
+	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+		// the out of date error may signal that the window was resized, so we handle it
+		_resize = true;
+	}
 
 	// update the number of frame
 	_frameNumber = (_frameNumber+1) % FRAME_OVERLAP;

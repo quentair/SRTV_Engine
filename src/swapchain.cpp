@@ -42,6 +42,8 @@ void srtv_engine::Swapchain::create(uint32_t width, uint32_t height)
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
 	_renderSemaphores = std::vector<VkSemaphore>(numberOfImages());
 
+	initSemaphores();
+
 	ENGINE_LOG_TRACE("Vulkan Swapchain creation went fine");
 }
 
@@ -54,10 +56,37 @@ void srtv_engine::Swapchain::destroy()
 
 		vkDestroyImageView(_device, _swapchainImageViews[i], nullptr);
 	}
+	for (auto& semaphore : _renderSemaphores) {
+		vkDestroySemaphore(_device, semaphore, nullptr);
+	}
 }
 
-void srtv_engine::Swapchain::getNextImage(VkSemaphore acquireImageSemaphore, uint32_t *swapchainImageIndex)
+VkResult srtv_engine::Swapchain::getNextImage(VkSemaphore acquireImageSemaphore, uint32_t *swapchainImageIndex)
 {
 	// get next available image from the swapchain
-	vkAcquireNextImageKHR(_device, _swapchain, 1000000000, acquireImageSemaphore, nullptr, swapchainImageIndex);
+	auto result = vkAcquireNextImageKHR(_device, _swapchain, 1000000000, acquireImageSemaphore, nullptr, swapchainImageIndex);
+	CHECK_VK_FATAL_ERROR(result);
+
+	return result;
+}
+
+void srtv_engine::Swapchain::initSemaphores()
+{
+	ENGINE_LOG_TRACE("Building swapchain semaphore...");
+
+	VkSemaphoreCreateInfo semaphoreCreateInfo = {};
+	semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	semaphoreCreateInfo.pNext = nullptr;
+	semaphoreCreateInfo.flags = 0;
+
+	// init swapchain semaphores
+	for (auto& semaphore : _renderSemaphores) {
+		CHECK_VK_FATAL_ERROR(vkCreateSemaphore(
+			_device,
+			&semaphoreCreateInfo,
+			nullptr,
+			&semaphore));
+	}
+
+	ENGINE_LOG_TRACE("Swapchain semaphore creation went fine");
 }

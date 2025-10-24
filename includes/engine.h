@@ -37,6 +37,7 @@ public:
 
 	bool _isInitialized{ false };
 	bool _stopRendering{ false };
+	bool _resize{ false };
 
 	// instance
 	bool _useValidationLayers{ true };
@@ -88,6 +89,7 @@ public:
 
 	// rendering resources
 	VkExtent2D _drawExtent;
+	float _renderScale = 1.f;
 	image::AllocatedImage _drawImage;
 
 	// rendering
