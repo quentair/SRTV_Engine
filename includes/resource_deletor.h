@@ -20,13 +20,15 @@ class ResourceDeletor {
 
 	void registerImage(image::AllocatedImage* allocatedImage);
 
-	void registerDescriptorAllocatorGrowble(DescriptorAllocatorGrowable* descriptorAllocator);
+	void registerDescriptorAllocatorGrowable(DescriptorAllocatorGrowable* descriptorAllocator);
 
-	void registerDescriptorSetLayout(VkDescriptorSetLayout* descriptorSetLayout);
+	void registerDescriptorPool(VkDescriptorPool descriptorPool);
 
-	void registerPipelineLayout(VkPipelineLayout* pipelineLayout);
+	void registerDescriptorSetLayout(VkDescriptorSetLayout descriptorSetLayout);
 
-	void registerPipeline(VkPipeline* pipeline);
+	void registerPipelineLayout(VkPipelineLayout pipelineLayout);
+
+	void registerPipeline(VkPipeline pipeline);
 
   private:
 
@@ -38,11 +40,13 @@ class ResourceDeletor {
 
 	std::vector<DescriptorAllocatorGrowable*> _descriptorAllocators;
 
-	std::vector<VkDescriptorSetLayout*> _descriptorSetLayouts;
+	std::vector<VkDescriptorPool> _descriptorPools;
 
-	std::vector<VkPipelineLayout*> _pipelineLayouts;
+	std::vector<VkDescriptorSetLayout> _descriptorSetLayouts;
 
-	std::vector<VkPipeline*> _pipelines;
+	std::vector<VkPipelineLayout> _pipelineLayouts;
+
+	std::vector<VkPipeline> _pipelines;
 };
 
 } // namespace srtv_engine

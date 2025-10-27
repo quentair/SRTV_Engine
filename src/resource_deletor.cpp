@@ -12,15 +12,18 @@ void ResourceDeletor::flush(VmaAllocator allocator, VkDevice device)
 	for (auto& descriptorAllocator : _descriptorAllocators) {
 		descriptorAllocator->destroyPools(device);
 	}
-	for (auto& descriptorSetLayout : _descriptorSetLayouts) {
-		vkDestroyDescriptorSetLayout(device, *descriptorSetLayout, nullptr);
+	for (auto decriptorPool : _descriptorPools) {
+		vkDestroyDescriptorPool(device, decriptorPool, nullptr);
+	}
+	for (auto descriptorSetLayout : _descriptorSetLayouts) {
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 	}
 	// destroy pipeline layout first, then pipeline
-	for (auto& pipelineLayout : _pipelineLayouts) {
-		vkDestroyPipelineLayout(device, *pipelineLayout, nullptr);
+	for (auto pipelineLayout : _pipelineLayouts) {
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 	}
-	for (auto& pipeline : _pipelines) {
-		vkDestroyPipeline(device, *pipeline, nullptr);
+	for (auto pipeline : _pipelines) {
+		vkDestroyPipeline(device, pipeline, nullptr);
 	}
 
 	_allocatedImages.clear();
@@ -32,25 +35,30 @@ void ResourceDeletor::registerImage(image::AllocatedImage* allocatedImage)
 	_allocatedImages.push_back(allocatedImage);
 }
 
-void ResourceDeletor::registerDescriptorAllocatorGrowble(DescriptorAllocatorGrowable* descriptorAllocator)
+void ResourceDeletor::registerDescriptorAllocatorGrowable(DescriptorAllocatorGrowable* descriptorAllocator)
 {
 	// register descriptor allocator for further deletion
 	_descriptorAllocators.push_back(descriptorAllocator);
 }
 
-void ResourceDeletor::registerDescriptorSetLayout(VkDescriptorSetLayout* descriptorSetLayout)
+void ResourceDeletor::registerDescriptorPool(VkDescriptorPool descriptorPool)
+{
+	_descriptorPools.push_back(descriptorPool);
+}
+
+void ResourceDeletor::registerDescriptorSetLayout(VkDescriptorSetLayout descriptorSetLayout)
 {
 	// register descriptor set layout for further deletion
 	_descriptorSetLayouts.push_back(descriptorSetLayout);
 }
 
-void ResourceDeletor::registerPipelineLayout(VkPipelineLayout* pipelineLayout)
+void ResourceDeletor::registerPipelineLayout(VkPipelineLayout pipelineLayout)
 {
 	// register pipeline layout for further deletion
 	_pipelineLayouts.push_back(pipelineLayout);
 }
 
-void ResourceDeletor::registerPipeline(VkPipeline* pipeline)
+void ResourceDeletor::registerPipeline(VkPipeline pipeline)
 {
 	// register pipeline for further deletion
 	_pipelines.push_back(pipeline);

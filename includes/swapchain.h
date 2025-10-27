@@ -15,11 +15,15 @@ class Swapchain {
 
 	  const VkSwapchainKHR* getSwapchain() const { return &_swapchain; }
 
-	  VkExtent2D getExtent() const { return _swapchainExtent; }
+	  const VkExtent2D getExtent() const { return _swapchainExtent; }
 
 	  const int numberOfImages() const { return _swapchainImages.size(); }
 
-	  VkImage getImageAt(int index) const { return _swapchainImages[index]; }
+	  const VkFormat getImageFormat() const { return _swapchainImageFormat; }
+
+	  VkImage getImageAt(int index) { return _swapchainImages[index]; }
+
+	  VkImageView getImageViewAt(int index) { return _swapchainImageViews[index]; }
 
 	  std::vector<VkSemaphore>& getRenderSemaphores() { return _renderSemaphores; }
 

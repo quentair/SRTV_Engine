@@ -9,6 +9,10 @@
 
 #include <fmt/core.h>
 
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
+
 #include <thread>
 #include <iostream>
 
@@ -33,6 +37,8 @@ void Engine::init()
 	initDescriptors();
 
 	initPipelines();
+
+	initImgui();
 
 	_isInitialized = true;
 }
@@ -146,23 +152,27 @@ void Engine::run()
 	// main loop
 	while (!quit)
 	{
-		SDL_PollEvent(&e);
+		while (SDL_PollEvent(&e)) {
 
-		switch (e.type) {
-		case SDL_EVENT_KEY_DOWN :
-			ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
-			break;
-		case SDL_EVENT_QUIT :
-			quit = true;
-			break;
-		case SDL_EVENT_WINDOW_MINIMIZED :
-			_stopRendering = true;
-			break;
-		case SDL_EVENT_WINDOW_RESTORED:
-			_stopRendering = false;
-			break;
-		default:
-			break;
+			switch (e.type) {
+			case SDL_EVENT_KEY_DOWN:
+				ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
+				break;
+			case SDL_EVENT_QUIT:
+				quit = true;
+				break;
+			case SDL_EVENT_WINDOW_MINIMIZED:
+				_stopRendering = true;
+				break;
+			case SDL_EVENT_WINDOW_RESTORED:
+				_stopRendering = false;
+				break;
+			default:
+				break;
+			}
+
+			//send SDL event to imgui for handling
+			ImGui_ImplSDL3_ProcessEvent(&e);
 		}
 
 		// do not draw if we are minimized
@@ -171,9 +181,19 @@ void Engine::run()
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			continue;
 		}
-		else {
-			draw();
-		}
+
+		// Start the Dear ImGui frame
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplSDL3_NewFrame();
+		ImGui::NewFrame();
+
+		//some imgui UI to test
+		ImGui::ShowDemoWindow();
+
+		//make imgui calculate internal draw structures
+		ImGui::Render();
+
+		draw();
 
 		if (_resize) {
 			ENGINE_LOG_TRACE("Resize window...");
@@ -191,6 +211,11 @@ void Engine::cleanup()
 	if (_isInitialized) {
 		//make sure the gpu has stopped doing its things
 		vkDeviceWaitIdle(_device);
+
+		// destroy ImGui implementation before destroying its allocated descriptors and pools
+		ImGui_ImplVulkan_Shutdown();
+		ImGui_ImplSDL3_Shutdown();
+		ImGui::DestroyContext();
 
 		for (auto& frame : _frames) {
 			vkDestroyCommandPool(_device, frame._commandPool, nullptr);
@@ -238,6 +263,58 @@ void Engine::createSdlWindow()
 	if (!_window) {
 		ENGINE_LOG_FATAL(fmt::format("Detected SDL fatal error: {}", SDL_GetError()));
 	}
+}
+
+void Engine::initImgui()
+{
+	// create descriptor pool for ImGUI
+	VkDescriptorPool imguiPool;
+	{
+
+		VkDescriptorPoolSize poolSizes[] =
+		{
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
+		};
+		VkDescriptorPoolCreateInfo imguiPoolInfo = {};
+		imguiPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		imguiPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+		imguiPoolInfo.maxSets = 0;
+		for (VkDescriptorPoolSize& poolSize : poolSizes)
+			imguiPoolInfo.maxSets += poolSize.descriptorCount;
+		imguiPoolInfo.poolSizeCount = (uint32_t)std::size(poolSizes);
+		imguiPoolInfo.pPoolSizes = poolSizes;
+		CHECK_VK_FATAL_ERROR(vkCreateDescriptorPool(_device, &imguiPoolInfo, nullptr, &imguiPool));
+	}
+
+	ImGui::CreateContext();
+
+	// setup Dear ImGui style
+	ImGui::StyleColorsDark();
+
+	// setup Platform/Renderer backends
+	ImGui_ImplSDL3_InitForVulkan(_window);
+	ImGui_ImplVulkan_InitInfo init_info = {};
+	init_info.ApiVersion = VK_API_VERSION_1_3;
+	init_info.Instance = _instance;
+	init_info.PhysicalDevice = _chosenGPU;
+	init_info.Device = _device;
+	init_info.QueueFamily = _graphicsQueueFamily;
+	init_info.Queue = _graphicsQueue;
+	init_info.DescriptorPool = imguiPool;
+	init_info.MinImageCount = _swapchain.numberOfImages();
+	init_info.ImageCount = _swapchain.numberOfImages();
+	init_info.UseDynamicRendering = true;
+	init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+	// dynamic rendering parameters for imgui to use
+	init_info.PipelineRenderingCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+	init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+	auto temp = _swapchain.getImageFormat();
+	init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &temp;
+	
+	ImGui_ImplVulkan_Init(&init_info);
+
+	// register ImGUI descrptor pool for further deletion
+	_mainResourceDeletor.registerDescriptorPool(imguiPool);
 }
 
 void Engine::initSwapchain()
@@ -476,7 +553,13 @@ void Engine::draw()
 	image::copyImageToImage(commandBuffer, _drawImage._image, _swapchain.getImageAt(swapchainImageIndex), _drawExtent, _swapchain.getExtent());
 
 	// set swapchain image to present layout so we can show it on the screen
-	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	//draw imgui into the swapchain image
+	drawImgui(commandBuffer, _swapchain.getImageViewAt(swapchainImageIndex));
+
+	// set swapchain image layout to Present so we can draw it
+	image::transitionImage(commandBuffer, _swapchain.getImageAt(swapchainImageIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	// end the command buffer (can't add commands to it, but it can now be executed)
 	CHECK_VK_ERROR(vkEndCommandBuffer(commandBuffer));
@@ -569,6 +652,39 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
 
+void Engine::drawImgui(VkCommandBuffer commandBuffer, VkImageView targetImageView)
+{
+	VkClearValue* clear = nullptr;
+
+	VkRenderingAttachmentInfo colorAttachment = {};
+	colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	colorAttachment.pNext = nullptr;
+	colorAttachment.imageView = targetImageView;
+	colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	colorAttachment.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	if (clear) {
+		colorAttachment.clearValue = *clear;
+	}
+
+	VkRenderingInfo renderInfo{};
+	renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+	renderInfo.pNext = nullptr;
+
+	renderInfo.renderArea = VkRect2D{ VkOffset2D { 0, 0 }, _swapchain.getExtent()};
+	renderInfo.layerCount = 1;
+	renderInfo.colorAttachmentCount = 1;
+	renderInfo.pColorAttachments = &colorAttachment;
+	renderInfo.pDepthAttachment = nullptr;
+	renderInfo.pStencilAttachment = nullptr;
+
+	vkCmdBeginRendering(commandBuffer, &renderInfo);
+
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+
+	vkCmdEndRendering(commandBuffer);
+}
+
 void Engine::initDescriptors()
 {
 	ENGINE_LOG_TRACE("Building Vulkan Descriptor Pool for the compute stage...");
@@ -610,8 +726,8 @@ void Engine::initDescriptors()
 	ENGINE_LOG_TRACE("Vulkan Descriptor Set allocation and binding went fine");
 
 	// register global descriptor pool and drawImage descriptor layout for further deletion
-	_mainResourceDeletor.registerDescriptorAllocatorGrowble(&_globalDescriptorAllocator);
-	_mainResourceDeletor.registerDescriptorSetLayout(&_drawImageDescriptorSetLayout);
+	_mainResourceDeletor.registerDescriptorAllocatorGrowable(&_globalDescriptorAllocator);
+	_mainResourceDeletor.registerDescriptorSetLayout(_drawImageDescriptorSetLayout);
 }
 
 void Engine::initPipelines()
@@ -636,7 +752,7 @@ void Engine::initBackgroundPipelines()
 	// load shader code
 
 	VkShaderModule computeDrawShader;
-	if (!loadShaderModule("../../shaders/gradient.comp.spv", _device, &computeDrawShader))
+	if (!loadShaderModule("../../shaders/sphere.comp.spv", _device, &computeDrawShader))
 	{
 		ENGINE_LOG_ERROR("Error when building the compute shader \n");
 	}
@@ -662,8 +778,8 @@ void Engine::initBackgroundPipelines()
 	vkDestroyShaderModule(_device, computeDrawShader, nullptr);
 
 	// regiser pipeline layout and pipeline for further deletion (delete pipelin layout first, then the pipeline)
-	_mainResourceDeletor.registerPipelineLayout(&_computePipelineLayout);
-	_mainResourceDeletor.registerPipeline(&_computePipeline);
+	_mainResourceDeletor.registerPipelineLayout(_computePipelineLayout);
+	_mainResourceDeletor.registerPipeline(_computePipeline);
 
 	ENGINE_LOG_TRACE("Vulkan Compute Pipeline creation went fine");
 }

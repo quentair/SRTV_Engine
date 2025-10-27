@@ -1,0 +1,82 @@
+// GLSL version to use
+#version 460
+
+// size of a workgroup for compute
+layout (local_size_x = 16, local_size_y = 16) in;
+
+// descriptor bindings for the pipeline
+layout(rgba16f,set = 0, binding = 0) uniform image2D image;
+
+struct Camera {
+    vec3 position;
+    vec3 forward;
+    vec3 right;
+    vec3 up;
+};
+
+struct Sphere {
+    vec3 center;
+    float radius;
+    vec3 color;
+};
+
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+bool hit_sphere(Ray ray, Sphere sphere);
+
+void main() 
+{
+    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(image);
+
+    // screen NDC
+    float uv_x = ( 2.0 * texelCoord.x - size.x ) / size.x;
+    float uv_y = ( 2.0 * texelCoord.y - size.y ) / size.x;
+
+    // camera setup
+    Camera camera;
+    camera.position = vec3(0,0,0);
+    camera.forward = vec3(0,0,-1);
+    camera.right = vec3(1,0,0);
+    camera.up = vec3(0,1,0);
+
+    // sphere setup
+    Sphere sphere;
+    sphere.center = vec3(0,0,-3);
+    sphere.radius = 1.0;
+    sphere.color = vec3(1.0, 0.0, 0.0);
+
+    // ray setup
+    Ray ray;
+    ray.origin = camera.position;
+    ray.direction = normalize(uv_x * camera.right + uv_y * camera.up + camera.forward);
+
+    vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
+
+    // ray test
+    if(hit_sphere(ray, sphere)) {
+        color.xyz = sphere.color;
+    }
+
+    imageStore(image, texelCoord, color);
+
+    // color writing
+}
+
+bool hit_sphere(Ray ray, Sphere sphere)
+{
+    vec3 L = ray.origin - sphere.center;
+    float a = 1; // because a = dot(ray.direction, ray.direction) and ray.direction is normalized
+    float b = 2*dot(ray.direction, L);
+    float c = dot(L, L) - sphere.radius*sphere.radius;
+
+    float discriminant = b*b - 4*a*c;
+
+    if (discriminant < 0)
+        return false;
+    
+    return true;
+}

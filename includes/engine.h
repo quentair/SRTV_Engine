@@ -58,6 +58,9 @@ public:
 	// surface
 	VkSurfaceKHR _surface;
 
+	// IMGUI
+	void initImgui();
+
 	// swapchain
 	Swapchain _swapchain;
 	void initSwapchain();
@@ -95,6 +98,7 @@ public:
 	// rendering
 	void draw();
 	void drawBackground(VkCommandBuffer commandBuffer);
+	void drawImgui(VkCommandBuffer commandBuffer, VkImageView targetImageView);
 
 	// descriptors
 	DescriptorAllocatorGrowable _globalDescriptorAllocator;
