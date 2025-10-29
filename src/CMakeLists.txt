@@ -39,6 +39,11 @@ add_executable(SRTVEngine
 
 	shader.cpp
 	${INCLUDE_DIR}/shader.h
+
+	${INCLUDE_DIR}/transform_component.h
+
+	camera.cpp
+	${INCLUDE_DIR}/camera.h
 	)
 
 ## add include files

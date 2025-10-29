@@ -15,6 +15,7 @@
 
 #include <thread>
 #include <iostream>
+#include <chrono>
 
 namespace srtv_engine {
 
@@ -149,6 +150,9 @@ void Engine::run()
 	SDL_Event e;
 	bool quit = false;
 
+	// starting time
+	auto currentTime = std::chrono::high_resolution_clock::now();
+
 	// main loop
 	while (!quit)
 	{
@@ -181,6 +185,13 @@ void Engine::run()
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			continue;
 		}
+
+		// start time of actual frame
+		auto newTime = std::chrono::high_resolution_clock::now();
+		// duration of precedent frame (start time of this frame - start time of precedent frame)
+		float frameTime = std::chrono::duration<float, std::chrono::seconds::period>(newTime - currentTime).count();
+		// update precedent frame start time for next iteration
+		currentTime = newTime;
 
 		// Start the Dear ImGui frame
 		ImGui_ImplVulkan_NewFrame();
