@@ -5,6 +5,8 @@
 #include "resource_deletor.h"
 #include "image.h"
 #include "descriptor.h"
+#include "camera.h"
+#include "camera_control.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -53,6 +55,7 @@ public:
 	// window
 	VkExtent2D _windowExtent{ 1700 , 900 };
 	SDL_Window* _window;
+	bool _relativeMode{ true };
 	void createSdlWindow();
 
 	// surface
@@ -110,7 +113,11 @@ public:
 	VkPipeline _computePipeline;
 	VkPipelineLayout _computePipelineLayout;
 	void initPipelines();
-	void initBackgroundPipelines();
+	void initComputePipelines();
+
+	// camera
+	Camera _mainCamera{};
+	CameraControl _cameraController{_mainCamera};
 };
 
 } // namespace srtv_engine

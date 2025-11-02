@@ -34,6 +34,8 @@ add_executable(SRTVEngine
 	descriptor.cpp
 	${INCLUDE_DIR}/descriptor.h
 
+	${INCLUDE_DIR}/push_constant.h
+
 	pipeline.cpp
 	${INCLUDE_DIR}/pipeline.h
 
@@ -44,6 +46,9 @@ add_executable(SRTVEngine
 
 	camera.cpp
 	${INCLUDE_DIR}/camera.h
+
+	camera_control.cpp
+	${INCLUDE_DIR}/camera_control.h
 	)
 
 ## add include files

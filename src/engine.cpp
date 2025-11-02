@@ -4,6 +4,7 @@
 #include "engine_logger.h"
 #include "pipeline.h"
 #include "shader.h"
+#include "push_constant.h"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -14,7 +15,6 @@
 #include <imgui_impl_vulkan.h>
 
 #include <thread>
-#include <iostream>
 #include <chrono>
 
 namespace srtv_engine {
@@ -156,29 +156,6 @@ void Engine::run()
 	// main loop
 	while (!quit)
 	{
-		while (SDL_PollEvent(&e)) {
-
-			switch (e.type) {
-			case SDL_EVENT_KEY_DOWN:
-				ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
-				break;
-			case SDL_EVENT_QUIT:
-				quit = true;
-				break;
-			case SDL_EVENT_WINDOW_MINIMIZED:
-				_stopRendering = true;
-				break;
-			case SDL_EVENT_WINDOW_RESTORED:
-				_stopRendering = false;
-				break;
-			default:
-				break;
-			}
-
-			//send SDL event to imgui for handling
-			ImGui_ImplSDL3_ProcessEvent(&e);
-		}
-
 		// do not draw if we are minimized
 		if (_stopRendering) {
 			// throttle the speed to avoid the endless spinning
@@ -192,6 +169,35 @@ void Engine::run()
 		float frameTime = std::chrono::duration<float, std::chrono::seconds::period>(newTime - currentTime).count();
 		// update precedent frame start time for next iteration
 		currentTime = newTime;
+
+		while (SDL_PollEvent(&e)) {
+
+			if (e.type == SDL_EVENT_KEY_DOWN) {
+				ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
+				if (e.key.key == SDLK_CAPSLOCK) {
+					SDL_SetWindowRelativeMouseMode(_window, _relativeMode = !_relativeMode);
+				}
+			}
+			else if (e.type == SDL_EVENT_QUIT) {
+				quit = true;
+			}
+			else if (e.type == SDL_EVENT_WINDOW_MINIMIZED) {
+				_stopRendering = true;
+			}
+			else if (e.type == SDL_EVENT_WINDOW_RESTORED) {
+				_stopRendering = false;
+			}
+
+			// send SDL event to imgui for handling
+			ImGui_ImplSDL3_ProcessEvent(&e);
+		}
+
+		// update camera by scanning keyboard input and mouse position
+		_cameraController.update(frameTime);
+
+		// put mouse cursor to cente of the screen
+		if(_relativeMode)
+			SDL_WarpMouseInWindow(_window, _windowExtent.width / 2.f, _windowExtent.height / 2.f);
 
 		// Start the Dear ImGui frame
 		ImGui_ImplVulkan_NewFrame();
@@ -274,6 +280,9 @@ void Engine::createSdlWindow()
 	if (!_window) {
 		ENGINE_LOG_FATAL(fmt::format("Detected SDL fatal error: {}", SDL_GetError()));
 	}
+
+	// hide mouse cursor and constrain it to the window by default
+	SDL_SetWindowRelativeMouseMode(_window, _relativeMode);
 }
 
 void Engine::initImgui()
@@ -659,6 +668,14 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	// bind the descriptor set containing the draw image for the compute pipeline
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
 
+	ComputeShaderCameraPushConstant pc;
+	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
+	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
+	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
+	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
+
+	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderCameraPushConstant), &pc);
+
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
@@ -743,10 +760,10 @@ void Engine::initDescriptors()
 
 void Engine::initPipelines()
 {
-	initBackgroundPipelines();
+	initComputePipelines();
 }
 
-void Engine::initBackgroundPipelines()
+void Engine::initComputePipelines()
 {
 	ENGINE_LOG_TRACE("Building Vulkan Compute Pipeline...");
 
@@ -757,6 +774,15 @@ void Engine::initBackgroundPipelines()
 	computePipelineLayoutCreateInfo.pNext = nullptr;
 	computePipelineLayoutCreateInfo.pSetLayouts = &_drawImageDescriptorSetLayout;
 	computePipelineLayoutCreateInfo.setLayoutCount = 1;
+
+	// push constants
+	VkPushConstantRange pushConstant{};
+	pushConstant.offset = 0;
+	pushConstant.size = sizeof(ComputeShaderCameraPushConstant);
+	pushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	computePipelineLayoutCreateInfo.pPushConstantRanges = &pushConstant;
+	computePipelineLayoutCreateInfo.pushConstantRangeCount = 1;
 
 	CHECK_VK_FATAL_ERROR(vkCreatePipelineLayout(_device, &computePipelineLayoutCreateInfo, nullptr, &_computePipelineLayout));
 

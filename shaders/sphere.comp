@@ -7,17 +7,9 @@ layout (local_size_x = 16, local_size_y = 16) in;
 // descriptor bindings for the pipeline
 layout(rgba16f,set = 0, binding = 0) uniform image2D image;
 
-struct Camera {
-    vec3 position;
-    vec3 forward;
-    vec3 right;
-    vec3 up;
-};
-
 struct Sphere {
     vec3 center;
     float radius;
-    vec3 color;
 };
 
 struct Ray {
@@ -25,40 +17,53 @@ struct Ray {
     vec3 direction;
 };
 
-bool hit_sphere(Ray ray, Sphere sphere);
+// camera space axis push constant block
+layout( push_constant ) uniform constants
+{
+    vec4 position;
+    vec4 front;
+    vec4 up;
+    vec4 right;
+} CameraPushConstant;
+
+float mapScene(vec3 p);
+
+float sphereDistance(vec3 p, float s);
 
 void main() 
 {
     ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(image);
 
+    vec4 color = vec4(1.0, 1.0, 1.0, 1.0);
+
     // screen NDC
     float uv_x = ( 2.0 * texelCoord.x - size.x ) / size.x;
     float uv_y = ( 2.0 * texelCoord.y - size.y ) / size.x;
 
     // camera setup
-    Camera camera;
-    camera.position = vec3(0,0,0);
-    camera.forward = vec3(0,0,-1);
-    camera.right = vec3(1,0,0);
-    camera.up = vec3(0,1,0);
-
-    // sphere setup
-    Sphere sphere;
-    sphere.center = vec3(0,0,-3);
-    sphere.radius = 1.0;
-    sphere.color = vec3(1.0, 0.0, 0.0);
+    vec3 cameraPosition = CameraPushConstant.position.xyz;
+    vec3 cameraForward = CameraPushConstant.front.xyz;
+    vec3 cameraUp = CameraPushConstant.up.xyz;
+    vec3 cameraRight = CameraPushConstant.right.xyz;
 
     // ray setup
     Ray ray;
-    ray.origin = camera.position;
-    ray.direction = normalize(uv_x * camera.right + uv_y * camera.up + camera.forward);
+    ray.origin = cameraPosition;
+    ray.direction = normalize(uv_x * cameraRight + uv_y * cameraUp + cameraForward);
 
-    vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
+    // traveled distance
+    float t = 0;
 
-    // ray test
-    if(hit_sphere(ray, sphere)) {
-        color.xyz = sphere.color;
+    // ray marching
+    for(int i = 0; i < 80; i++) {
+        vec3 p = ray.origin + ray.direction*t; // position along the ray
+        float d = mapScene(p);
+        t += d;
+
+        if(d < .001) // early stop with hit threshold
+            color = vec4(1.0, 0.0, 0.0, 1.0);
+        if(t > 100.0) break; // early stop with max distance traveled threshold
     }
 
     imageStore(image, texelCoord, color);
@@ -66,17 +71,19 @@ void main()
     // color writing
 }
 
-bool hit_sphere(Ray ray, Sphere sphere)
+float mapScene(vec3 p) 
 {
-    vec3 L = ray.origin - sphere.center;
-    float a = 1; // because a = dot(ray.direction, ray.direction) and ray.direction is normalized
-    float b = 2*dot(ray.direction, L);
-    float c = dot(L, L) - sphere.radius*sphere.radius;
+    // sphere setup
+    Sphere sphere;
+    sphere.center = vec3(0,0,3);
+    sphere.radius = 1.0;
 
-    float discriminant = b*b - 4*a*c;
+    float distanceToSphere = sphereDistance(p - sphere.center, sphere.radius);
 
-    if (discriminant < 0)
-        return false;
-    
-    return true;
+    return distanceToSphere;
+}
+
+float sphereDistance(vec3 p, float s)
+{
+    return length(p) - s;
 }

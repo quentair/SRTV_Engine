@@ -17,7 +17,7 @@ class Camera {
 	void setCameraYXZ(glm::vec3 cameraPosition, glm::vec3 cameraRotation);
 
 	const glm::mat4& getProjectionMatrix() const { return _projectionMatrix; }
-	const glm::mat4& getViewnMatrix() const { return _viewMatrix; }
+	const glm::mat4& getViewMatrix() const { return _viewMatrix; }
 
   private :
 	glm::mat4 _projectionMatrix{ 1.f };

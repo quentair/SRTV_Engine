@@ -6,7 +6,7 @@
 
 namespace srtv_engine {
 
-class FrameData {
+struct FrameData {
   public:
 
 	VkCommandPool _commandPool;
