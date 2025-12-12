@@ -36,7 +36,7 @@ void srtv_engine::Camera::perspectiveProjection(float fovY, float aspectRatio, f
 void Camera::setCameraDirection(glm::vec3 cameraPosition, glm::vec3 cameraDirection, glm::vec3 cameraUp)
 {
 	// construct a rotation matrix with camera orthonormal basis
-	// it is transposed to go from camera space to Vulkan axis space
+	// it is transposed to rotate from camera orientation to Vulkan axis aligned orientation
 	const glm::vec3 w{ glm::normalize(cameraDirection) };
 	const glm::vec3 u{ glm::normalize(glm::cross(w, cameraUp)) };
 	const glm::vec3 v{ glm::cross(w, u) };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "image.h"
+#include "buffer.h"
 #include "descriptor.h"
 
 #include <vulkan/vulkan.h>
@@ -20,6 +21,8 @@ class ResourceDeletor {
 
 	void registerImage(image::AllocatedImage* allocatedImage);
 
+	void registerBuffer(buffer::AllocatedBuffer* buffer);
+	
 	void registerDescriptorAllocatorGrowable(DescriptorAllocatorGrowable* descriptorAllocator);
 
 	void registerDescriptorPool(VkDescriptorPool descriptorPool);
@@ -38,6 +41,8 @@ class ResourceDeletor {
 
 	std::vector<image::AllocatedImage*> _allocatedImages;
 
+	std::vector<buffer::AllocatedBuffer*> _allocatedBuffers;
+
 	std::vector<DescriptorAllocatorGrowable*> _descriptorAllocators;
 
 	std::vector<VkDescriptorPool> _descriptorPools;
@@ -47,6 +52,7 @@ class ResourceDeletor {
 	std::vector<VkPipelineLayout> _pipelineLayouts;
 
 	std::vector<VkPipeline> _pipelines;
+
 };
 
 } // namespace srtv_engine

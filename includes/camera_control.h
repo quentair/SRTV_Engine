@@ -23,7 +23,7 @@ public:
 
 	float _rotationSpeed{ 3.5f };
 
-	glm::vec3 _cameraPosition{ 0.f };
+	glm::vec3 _cameraPosition{ 0.f, 0.f, 0.f };
 
 	glm::vec3 _cameraFront{ 0.f, 0.f, 1.f };
 

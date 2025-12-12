@@ -30,6 +30,9 @@ add_executable(SRTVEngine
 
 	image.cpp
 	${INCLUDE_DIR}/image.h
+	
+	buffer.cpp
+	${INCLUDE_DIR}/buffer.h
 
 	descriptor.cpp
 	${INCLUDE_DIR}/descriptor.h
@@ -49,6 +52,21 @@ add_executable(SRTVEngine
 
 	camera_control.cpp
 	${INCLUDE_DIR}/camera_control.h
+
+	brickmap.cpp
+	${INCLUDE_DIR}/brickmap.h
+
+	brick_chunk.cpp
+	${INCLUDE_DIR}/brick_chunk.h
+
+	world_region.cpp
+	${INCLUDE_DIR}/world_region.h
+
+	world.cpp
+	${INCLUDE_DIR}/world.h
+
+	gpu_world.cpp
+	${INCLUDE_DIR}/gpu_world.h
 	)
 
 ## add include files

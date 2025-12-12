@@ -7,6 +7,8 @@
 #include "descriptor.h"
 #include "camera.h"
 #include "camera_control.h"
+#include "world.h"
+#include "gpu_world.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -102,10 +104,12 @@ public:
 	void draw();
 	void drawBackground(VkCommandBuffer commandBuffer);
 	void drawImgui(VkCommandBuffer commandBuffer, VkImageView targetImageView);
+	void drawWorld(VkCommandBuffer commandBuffer);
 
 	// descriptors
 	DescriptorAllocatorGrowable _globalDescriptorAllocator;
 	VkDescriptorSetLayout _drawImageDescriptorSetLayout;
+	VkDescriptorSetLayout _worldgenDescriptorSetLayout;
 	VkDescriptorSet _drawImageDescriptorSet;
 	void initDescriptors();
 
@@ -118,6 +122,16 @@ public:
 	// camera
 	Camera _mainCamera{};
 	CameraControl _cameraController{_mainCamera};
+
+	// buffers
+	void initBuffers();
+
+	// world CPU side
+	worldgen::World _world{};
+	void initWorld();
+
+	// world data for rendering
+	worldgen::GpuWorld _worldRenderingData{};
 };
 
 } // namespace srtv_engine

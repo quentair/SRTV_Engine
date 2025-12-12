@@ -31,6 +31,8 @@ void Engine::init()
 
 	initDrawImage();
 
+	initBuffers();
+
 	initCommands();
 
 	initSyncStructures();
@@ -40,6 +42,8 @@ void Engine::init()
 	initPipelines();
 
 	initImgui();
+
+	initWorld();
 
 	_isInitialized = true;
 }
@@ -249,6 +253,9 @@ void Engine::cleanup()
 
 		destroySwapchain();
 
+		// destroy VMA allocator
+		vmaDestroyAllocator(_allocator);
+
 		vkDestroyDevice(_device, nullptr);
 
 		vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -448,7 +455,7 @@ void Engine::initDrawImage()
 	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
 	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-	//for the draw image, we want to allocate it from gpu local memory
+	// for the draw image, we want to allocate it from gpu local memory
 	VmaAllocationCreateInfo allocationInfo = {};
 	allocationInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 	allocationInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -563,7 +570,9 @@ void Engine::draw()
 	image::transitionImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
 	// draw the background
-	drawBackground(commandBuffer);
+	//drawBackground(commandBuffer);
+
+	drawWorld(commandBuffer);
 
 	// transition the draw image and the swapchain image into their correct transfer layouts
 	image::transitionImage(commandBuffer, _drawImage._image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -713,6 +722,65 @@ void Engine::drawImgui(VkCommandBuffer commandBuffer, VkImageView targetImageVie
 	vkCmdEndRendering(commandBuffer);
 }
 
+void Engine::drawWorld(VkCommandBuffer commandBuffer)
+{
+	// update chunks to render
+	
+	_worldRenderingData.resetChunks();
+	_worldRenderingData.initChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+
+	// write into each world generation SSBO
+
+	void* worldData;
+	void* viewDistanceGridData;
+	void* chunksData;
+
+	vmaMapMemory(_allocator, getCurrentFrame()._worldDataBuffer._allocation, &worldData);
+	vmaMapMemory(_allocator, getCurrentFrame()._viewDistanceGridBuffer._allocation, &viewDistanceGridData);
+	vmaMapMemory(_allocator, getCurrentFrame()._chunksDataBuffer._allocation, &chunksData);
+
+	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)worldData;
+	uint32_t* viewDistanceGridSSBO = (uint32_t*)viewDistanceGridData;
+	worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)chunksData;
+
+	*worldDataSSBO = _worldRenderingData._worldData;
+
+	for (int i = 0; i < _worldRenderingData._viewDistanceGrid.size(); i++)
+	{
+		viewDistanceGridSSBO[i] = _worldRenderingData._viewDistanceGrid[i];
+	}
+
+	for (int i = 0; i < _worldRenderingData._chunksDataColumns.size(); i++)
+	{
+		chunksColumnDataSSBO[i] = _worldRenderingData._chunksDataColumns[i];
+	}
+
+	vmaUnmapMemory(_allocator, getCurrentFrame()._worldDataBuffer._allocation);
+	vmaUnmapMemory(_allocator, getCurrentFrame()._viewDistanceGridBuffer._allocation);
+	vmaUnmapMemory(_allocator, getCurrentFrame()._chunksDataBuffer._allocation);
+
+	// bind the gradient drawing compute pipeline
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
+
+	// bind the descriptor set containing the draw image for the compute pipeline
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
+
+	// same for SSBOs (set at set 1)
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 1, 1, &getCurrentFrame()._worldgenDescriptorSet, 0, nullptr);
+
+	ComputeShaderCameraPushConstant pc;
+	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
+	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
+	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
+	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
+
+	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderCameraPushConstant), &pc);
+
+	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
+	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
+
+}
+
 void Engine::initDescriptors()
 {
 	ENGINE_LOG_TRACE("Building Vulkan Descriptor Pool for the compute stage...");
@@ -721,7 +789,9 @@ void Engine::initDescriptors()
 	
 	// our descriptor pool can allocate up to (ratios * number of sets) of each descriptor type (here, 1 * number of sets storage image)
 	std::vector<PoolSizeRatio> ratios = {
-		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}
+		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 }
 	};
 
 	// our descriptor pool can allocate up to 10 sets (so 10 storage image in total)
@@ -734,28 +804,52 @@ void Engine::initDescriptors()
 	// create the descriptor set layout for our compute draw (it needs to reflect our pool, so only storage image)
 	{
 		DescriptorLayoutBuilder builder;
-		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // at binding 0 in the shader, we must have a storage image
+		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // at set 0 binding 0 in the shader, we must have a storage image
 		_drawImageDescriptorSetLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT); // the layout is made for compute shader stage
 	}
 	// with a layout of 1 storage image binding, we can allocate up to 10 sets from our pool
+
+	{
+		DescriptorLayoutBuilder builder;
+		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 0 in the shader, we must have a storage buffer
+		builder.addBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 1 in the shader, we must have a storage buffer
+		builder.addBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 2 in the shader, we must have a storage buffer
+		_worldgenDescriptorSetLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT); // the layout is made for compute shader stage
+	}
 
 	ENGINE_LOG_TRACE("Vulkan Descriptor Layout creation went fine");
 
 	ENGINE_LOG_TRACE("Allocating and binding Vulkan Descriptor Set for the compute stage...");
 
-	// allocate a descriptor set from our pool following our descriptor set layout
+	// allocate the descriptor sets from our pool following our descriptor sets layouts
 	_drawImageDescriptorSet = _globalDescriptorAllocator.allocate(_device, _drawImageDescriptorSetLayout);
 
+	for (auto& frame : _frames) {
+		frame._worldgenDescriptorSet = _globalDescriptorAllocator.allocate(_device, _worldgenDescriptorSetLayout);
+	}
+
 	// bind our draw image to the descriptor set (the image must a storage image situated in the GENERAL layout)
-	DescriptorWriter writer;
-	writer.writeImage(0, _drawImage._imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-	writer.updateSet(_device, _drawImageDescriptorSet);
+	DescriptorWriter imageWriter;
+	imageWriter.writeImage(0, _drawImage._imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+	imageWriter.updateSet(_device, _drawImageDescriptorSet);
+
+	// bind our storage buffer the same manner
+	for (auto& frame : _frames) {
+		DescriptorWriter ssboWriter;
+		ssboWriter.writeBuffer(0, frame._worldDataBuffer._buffer, sizeof(worldgen::WorldGpuData), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(1, frame._viewDistanceGridBuffer._buffer, sizeof(uint32_t) * VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(2, frame._chunksDataBuffer._buffer, sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.updateSet(_device, frame._worldgenDescriptorSet);
+	}
 
 	ENGINE_LOG_TRACE("Vulkan Descriptor Set allocation and binding went fine");
 
 	// register global descriptor pool and drawImage descriptor layout for further deletion
 	_mainResourceDeletor.registerDescriptorAllocatorGrowable(&_globalDescriptorAllocator);
 	_mainResourceDeletor.registerDescriptorSetLayout(_drawImageDescriptorSetLayout);
+
+	// same for ssbo descriptor layout
+	_mainResourceDeletor.registerDescriptorSetLayout(_worldgenDescriptorSetLayout);
 }
 
 void Engine::initPipelines()
@@ -769,11 +863,13 @@ void Engine::initComputePipelines()
 
 	// create a pipeline layout for our compute stage draw
 
+	VkDescriptorSetLayout setLayouts[] = { _drawImageDescriptorSetLayout, _worldgenDescriptorSetLayout };
+
 	VkPipelineLayoutCreateInfo computePipelineLayoutCreateInfo = {};
 	computePipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	computePipelineLayoutCreateInfo.pNext = nullptr;
-	computePipelineLayoutCreateInfo.pSetLayouts = &_drawImageDescriptorSetLayout;
-	computePipelineLayoutCreateInfo.setLayoutCount = 1;
+	computePipelineLayoutCreateInfo.pSetLayouts = setLayouts;
+	computePipelineLayoutCreateInfo.setLayoutCount = 2;
 
 	// push constants
 	VkPushConstantRange pushConstant{};
@@ -789,7 +885,7 @@ void Engine::initComputePipelines()
 	// load shader code
 
 	VkShaderModule computeDrawShader;
-	if (!loadShaderModule("../../shaders/sphere.comp.spv", _device, &computeDrawShader))
+	if (!loadShaderModule("../../shaders/voxel_test.comp.spv", _device, &computeDrawShader))
 	{
 		ENGINE_LOG_ERROR("Error when building the compute shader \n");
 	}
@@ -819,6 +915,68 @@ void Engine::initComputePipelines()
 	_mainResourceDeletor.registerPipeline(_computePipeline);
 
 	ENGINE_LOG_TRACE("Vulkan Compute Pipeline creation went fine");
+}
+
+void Engine::initBuffers()
+{
+	ENGINE_LOG_TRACE("Building Vulkan Buffers for GPU datas...");
+
+	// world generation buffers send to GPU
+	for (auto& frame : _frames) {
+		VkBufferCreateInfo worldBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::WorldGpuData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		VkBufferCreateInfo viewDistanceGridBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(uint32_t) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		VkBufferCreateInfo chunksBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		// buffers for data written by or transferred from the GPU that we want to read back on the CPU
+		VmaAllocationCreateInfo vmaallocInfo = {};
+		vmaallocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		vmaallocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		// allocate buffers with VMA
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &worldBufferCreateInfo, &vmaallocInfo,
+			&frame._worldDataBuffer._buffer,
+			&frame._worldDataBuffer._allocation,
+			nullptr));
+
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &viewDistanceGridBufferCreateInfo, &vmaallocInfo,
+			&frame._viewDistanceGridBuffer._buffer,
+			&frame._viewDistanceGridBuffer._allocation,
+			nullptr));
+
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksBufferCreateInfo, &vmaallocInfo,
+			&frame._chunksDataBuffer._buffer,
+			&frame._chunksDataBuffer._allocation,
+			nullptr));
+
+		// register buffers for furhter deletion
+		_mainResourceDeletor.registerBuffer(&frame._worldDataBuffer);
+		_mainResourceDeletor.registerBuffer(&frame._viewDistanceGridBuffer);
+		_mainResourceDeletor.registerBuffer(&frame._chunksDataBuffer);
+	}
+
+	ENGINE_LOG_TRACE("Creation of Vulkan Buffers went fine");
+}
+
+void Engine::initWorld()
+{
+	ENGINE_LOG_TRACE("Generating world...");
+
+	// start time of world generation
+	auto beginTime = std::chrono::high_resolution_clock::now();
+
+	glm::ivec3 startingRegion{0,0,0};
+	_cameraController._cameraPosition = glm::vec3{ REGION_VOXEL_RESOLUTION_XZ/2.0f, 257.0f, REGION_VOXEL_RESOLUTION_XZ/2.0f };
+	_world.generateRegion(startingRegion.x, startingRegion.y, startingRegion.z);
+	_worldRenderingData.initChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+
+	// end time of world generation
+	auto endtime = std::chrono::high_resolution_clock::now();
+	// duration of world generation
+	float worldGenTime = std::chrono::duration<float, std::chrono::seconds::period>(endtime - beginTime).count();
+
+	ENGINE_LOG_TRACE(fmt::format("World generation completed (took {} seconds)", worldGenTime));
 }
 
 } // namespace srtv_engine

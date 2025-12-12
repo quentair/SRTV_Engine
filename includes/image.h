@@ -5,23 +5,23 @@
 
 namespace srtv_engine::image {
 
-    class AllocatedImage {
-      public :
-        VkImage _image;
-        VkImageView _imageView;
-        VmaAllocation _allocation;
-        VkExtent3D _imageExtent;
-        VkFormat _imageFormat;
-    };
+class AllocatedImage {
+  public :
+    VkImage _image;
+    VkImageView _imageView;
+    VmaAllocation _allocation;
+    VkExtent3D _imageExtent;
+    VkFormat _imageFormat;
+};
 
-    VkImageCreateInfo defaultImageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
+VkImageCreateInfo defaultImageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
 
-    VkImageViewCreateInfo defaultImageviewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
+VkImageViewCreateInfo defaultImageviewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
 
-	void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
+void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 
-	VkImageSubresourceRange createDefaultImageSubresourceRange(VkImageAspectFlags aspectMask);
+VkImageSubresourceRange createDefaultImageSubresourceRange(VkImageAspectFlags aspectMask);
 
-    void copyImageToImage(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize);
+void copyImageToImage(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize);
 
 } // namespace srtv_engine::image
