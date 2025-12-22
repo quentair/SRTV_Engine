@@ -36,7 +36,6 @@ class BrickChunk {
 	// pointer to allocated GPU data of the chunk
 	//std::array<Brickmap*, INITIAL_GPU_BRICKMAPS_NUMBER> _gpuChunkData{};
 	//std::array<uint32_t*, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE> _gpuIndices;
-	bool _wasGenerated = false; // was the chunk generated at last frame
 
 	// GPU data size for the chunk
 	int _gpuBrickmapsCount = INITIAL_GPU_BRICKMAPS_NUMBER; // number of brickmaps we can send to the GPU (start with one surface worth of brickmaps)

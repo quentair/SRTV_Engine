@@ -28,10 +28,10 @@ struct ChunksColumnGpuData {
 };
 
 struct WorldGpuData {
-	std::array<Brickmap, BRICKMAP_QUEUE_SIZE> _bricksQueue;
-	std::array<uint32_t, BRICKMAP_QUEUE_SIZE> _indicesQueue;
+	//std::array<Brickmap, BRICKMAP_QUEUE_SIZE> _bricksQueue;
+	//std::array<uint32_t, BRICKMAP_QUEUE_SIZE> _indicesQueue;
 
-	std::array<glm::ivec3, BRICKMAP_QUEUE_SIZE> _brickLoadQueue;
+	std::array<glm::ivec4, BRICKMAP_QUEUE_SIZE> _brickLoadQueue;
 	uint32_t _brickLoadQueueCount{ 0 };
 };
 
@@ -48,15 +48,22 @@ class GpuWorld {
 	// Buffer3 : data of chunks organised into columns of chunks
 	std::vector<ChunksColumnGpuData> _chunksDataColumns = std::vector<ChunksColumnGpuData>(VIEW_GRID_SIZE);
 
-	//  quick access to chunks cached for GPU
-	std::array<BrickChunk*, VIEW_GRID_SIZE * REGION_SIZE_Y> gpuLoadedChunks;
+	//  quick access to chunks cached for the GPU
+	std::array<BrickChunk*, VIEW_GRID_SIZE * REGION_SIZE_Y> _gpuLoadedChunks;
 
-	bool initChunks(WorldRegion& region, glm::vec3 playerWorldPos);
+	bool loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
 
 	void resetChunks() {
 		for (int i = 0; i < VIEW_GRID_SIZE; i++) {
 			_viewDistanceGrid[i] = 0;
 		}
+	}
+
+	void resetQueues() {
+		//_worldData._bricksQueue.fill(Brickmap());
+		//_worldData._indicesQueue.fill(0);
+		//_worldData._brickLoadQueue.fill(glm::ivec4(0, 0, 0, 0));
+		_worldData._brickLoadQueueCount = 0;
 	}
 };
 

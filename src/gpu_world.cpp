@@ -2,7 +2,7 @@
 
 namespace srtv_engine::worldgen {
 
-    bool GpuWorld::initChunks(WorldRegion& region, glm::vec3 playerWorldPos)
+    bool GpuWorld::loadChunks(WorldRegion& region, glm::vec3 playerWorldPos)
     {
         // Prepare chunk content for GPU
         // at first feedback loop, all chunks are not loaded to GPU, the GPU request those needed afterward
@@ -37,6 +37,40 @@ namespace srtv_engine::worldgen {
         // temporary chunk pointer and chunk data vector to displace them instead of reloading them if they are still in the grid but moved from position (cell)
         std::vector<std::pair<BrickChunk*, ChunkGpuData>> tempChunks;
 
+        // fill the temporary buffer 
+        // do this before actual reload algorithm because the load order depends on player displacement (if player goes backward, back row to front row reload is needed, if player goes frontward, front row to top row reload is needed, same with columns if player goes left or right)
+        // so entirely filling it before will get rid of this at the cost of perdormances when reload is needed (so we just need a basic all around back row to front row reload)
+        for (int xRegion = chunkGridBottomLeftCorner.x; xRegion <= chungGirdUpperRightCorner.x; xRegion++) {
+            for (int zRegion = chunkGridBottomLeftCorner.z; zRegion <= chungGirdUpperRightCorner.z; zRegion++) {
+
+                // convert chunk grid position to view grid position
+                glm::ivec2 viewGridPos = glm::ivec2(chunkGridBottomLeftCorner.x - viegGridBottomLeftCorner.x + xRegion - chunkGridBottomLeftCorner.x, chunkGridBottomLeftCorner.z - viegGridBottomLeftCorner.z + zRegion - chunkGridBottomLeftCorner.z);
+                int viewGridIndex = viewGridPos.x + viewGridPos.y * (VIEWDISTANCE * 2 + 1);
+
+                for (int yRegion = 0; yRegion < REGION_SIZE_Y; yRegion++) {
+
+                    // retrieve chunk data from region
+                    int index = region.localPosToIndex(xRegion, yRegion, zRegion);
+                    BrickChunk* chunk = region._chunks[index].get();
+
+                    // get chunk data in the chunk column given its y position
+                    ChunkGpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
+
+                    // check if the chunk was already loaded in the gpu at the right position, if so, no need to save it for hot-reload
+                    int loadedMapIndex = viewGridIndex + yRegion * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+                    if (_gpuLoadedChunks.at(loadedMapIndex) == chunk) {
+                        continue;
+                    }
+
+                    // save gpu chunk and its data for possible hot-reload
+                    if (_gpuLoadedChunks.at(loadedMapIndex) != nullptr)
+                    {
+                        tempChunks.push_back(std::make_pair(_gpuLoadedChunks.at(loadedMapIndex), *chunkData));
+                    }
+                }
+            }
+        }
+
         // generate all chunks of the region inside view distance
         for (int xRegion = chunkGridBottomLeftCorner.x; xRegion <= chungGirdUpperRightCorner.x; xRegion++) {
             for (int zRegion = chunkGridBottomLeftCorner.z; zRegion <= chungGirdUpperRightCorner.z; zRegion++) {
@@ -56,22 +90,14 @@ namespace srtv_engine::worldgen {
                     // get chunk data in the chunk column given its y position
                     ChunkGpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
 
-                    // check if the chunk was already loaded in the gpu, if so, no need to reload it to the gpu
+                    // check if the chunk was already loaded in the gpu at the right position, if so, no need to check for hot-reload or replace it
                     int loadedMapIndex = viewGridIndex + yRegion * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
-                    if (gpuLoadedChunks.at(loadedMapIndex) == chunk) {
+                    if (_gpuLoadedChunks.at(loadedMapIndex) == chunk) {
                         continue;
                     }
 
-                    // save gpu chunk and its data for possible hot-reload
-                    if (gpuLoadedChunks.at(loadedMapIndex) != nullptr && gpuLoadedChunks.at(loadedMapIndex)->_wasGenerated)
-                    {
-                        gpuLoadedChunks.at(loadedMapIndex)->_wasGenerated = false;
-                        tempChunks.push_back(std::make_pair(gpuLoadedChunks.at(loadedMapIndex), *chunkData));
-                    }
-
                     // save chunk pointer and mark it as loaded in the GPU
-                    gpuLoadedChunks.at(loadedMapIndex) = chunk;
-                    chunk->_wasGenerated = true;
+                    _gpuLoadedChunks.at(loadedMapIndex) = chunk;
 
                     // if the chunk was an already loaded chunk but changed from position (cell), just copy back the content
                     bool copied = false;
@@ -91,9 +117,9 @@ namespace srtv_engine::worldgen {
                         // TODO : LODs
                         int brickIndex = chunk->_indices[i] & BRICKMAP_INDEX_BITS;
                         if (chunk->_indices[i] & BRICKMAP_LOADED_BIT) {
-                            //chunkData->_brickmaps[i] = BRICKMAP_UNLOADED_BIT | (chunk->_indices[i] & BRICKMAP_LOD_BITS);
-                            chunkData->_brickmaps[i] = BRICKMAP_LOADED_BIT | chunk->_indices[i];
-                            chunkData->_brickmapsData[i] = chunk->_brickmaps[brickIndex];
+                            chunkData->_brickmaps[i] = BRICKMAP_UNLOADED_BIT | (chunk->_indices[i] & BRICKMAP_LOD_BITS) | (chunk->_indices[i] & BRICKMAP_INDEX_BITS);
+                            //chunkData->_brickmaps[i] = BRICKMAP_LOADED_BIT | chunk->_indices[i];
+                            //chunkData->_brickmapsData[i] = chunk->_brickmaps[brickIndex];
                         }
                         else {
                             chunkData->_brickmaps[i] = 0;

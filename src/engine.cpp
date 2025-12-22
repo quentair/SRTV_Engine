@@ -523,9 +523,12 @@ void Engine::initSyncStructures()
 
 void Engine::draw()
 {
-	// wait for precedent frame to be drawn (1 second timeout)
+	// wait for precedent associated frame in our in-flight frames (so 2 frame before) to be drawn (1 second timeout)
 	CHECK_VK_ERROR(vkWaitForFences(_device, 1, &getCurrentFrame()._renderFence, true, 1000000000));
 	CHECK_VK_ERROR(vkResetFences(_device, 1, &getCurrentFrame()._renderFence));
+
+	// readback of SSBO of precedent asscociated frame to prepare the next frame datas
+	readbackBuffers(_frameNumber);
 
 	getCurrentFrame()._frameResourceDeletor.flush(_allocator, _device);
 
@@ -547,7 +550,7 @@ void Engine::draw()
 
 	VkCommandBuffer commandBuffer = getCurrentFrame()._commandBuffer;
 
-	// reset the command buffer to begin recording again (fence usage makes this operation safe because the precedent frame was drawn)
+	// reset the command buffer to begin recording again (fence usage makes this operation safe because the precedent associated frame was drawn)
 	CHECK_VK_ERROR(vkResetCommandBuffer(commandBuffer, 0));
 
 	// we will use this command buffer only once, so we set this flag in the creation info
@@ -727,21 +730,12 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	// update chunks to render
 	
 	_worldRenderingData.resetChunks();
-	_worldRenderingData.initChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+	_worldRenderingData.loadChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
 
 	// write into each world generation SSBO
-
-	void* worldData;
-	void* viewDistanceGridData;
-	void* chunksData;
-
-	vmaMapMemory(_allocator, getCurrentFrame()._worldDataBuffer._allocation, &worldData);
-	vmaMapMemory(_allocator, getCurrentFrame()._viewDistanceGridBuffer._allocation, &viewDistanceGridData);
-	vmaMapMemory(_allocator, getCurrentFrame()._chunksDataBuffer._allocation, &chunksData);
-
-	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)worldData;
-	uint32_t* viewDistanceGridSSBO = (uint32_t*)viewDistanceGridData;
-	worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)chunksData;
+	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getCurrentFrame()._worldDataBufferAllocInfo.pMappedData;
+	uint32_t* viewDistanceGridSSBO = (uint32_t*)getCurrentFrame()._viewDistanceGridAllocInfo.pMappedData;
+	worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)getCurrentFrame()._chunksDataBufferAllocInfo.pMappedData;
 
 	*worldDataSSBO = _worldRenderingData._worldData;
 
@@ -754,11 +748,7 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	{
 		chunksColumnDataSSBO[i] = _worldRenderingData._chunksDataColumns[i];
 	}
-
-	vmaUnmapMemory(_allocator, getCurrentFrame()._worldDataBuffer._allocation);
-	vmaUnmapMemory(_allocator, getCurrentFrame()._viewDistanceGridBuffer._allocation);
-	vmaUnmapMemory(_allocator, getCurrentFrame()._chunksDataBuffer._allocation);
-
+	
 	// bind the gradient drawing compute pipeline
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
 
@@ -927,7 +917,7 @@ void Engine::initBuffers()
 
 		VkBufferCreateInfo viewDistanceGridBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(uint32_t) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-		VkBufferCreateInfo chunksBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 		// buffers for data written by or transferred from the GPU that we want to read back on the CPU
 		VmaAllocationCreateInfo vmaallocInfo = {};
@@ -938,17 +928,17 @@ void Engine::initBuffers()
 		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &worldBufferCreateInfo, &vmaallocInfo,
 			&frame._worldDataBuffer._buffer,
 			&frame._worldDataBuffer._allocation,
-			nullptr));
+			&frame._worldDataBufferAllocInfo));
 
 		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &viewDistanceGridBufferCreateInfo, &vmaallocInfo,
 			&frame._viewDistanceGridBuffer._buffer,
 			&frame._viewDistanceGridBuffer._allocation,
-			nullptr));
+			& frame._viewDistanceGridAllocInfo));
 
-		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksBufferCreateInfo, &vmaallocInfo,
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksDataBufferCreateInfo, &vmaallocInfo,
 			&frame._chunksDataBuffer._buffer,
 			&frame._chunksDataBuffer._allocation,
-			nullptr));
+			&frame._chunksDataBufferAllocInfo));
 
 		// register buffers for furhter deletion
 		_mainResourceDeletor.registerBuffer(&frame._worldDataBuffer);
@@ -957,6 +947,48 @@ void Engine::initBuffers()
 	}
 
 	ENGINE_LOG_TRACE("Creation of Vulkan Buffers went fine");
+}
+
+void Engine::readbackBuffers(int frameNumber)
+{
+	// read world data SSBO to retrieve brickmaps load queue
+	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getFrame(frameNumber)._worldDataBufferAllocInfo.pMappedData;
+
+	uint32_t numberOfBricksToLoad = std::min(worldDataSSBO->_brickLoadQueueCount, uint32_t(BRICKMAP_QUEUE_SIZE));
+
+	if (numberOfBricksToLoad == 0)
+		return;
+
+	// retrieve each unloaded brick
+	// their indices are available in the _chunksDataColumns, but not their data
+	// so we can retrieve the indices from the _chunksDataColumns and use it to parse our chunks that were cached for the GPU (_gpuLoadedChunks)
+	for (int i = 0; i < numberOfBricksToLoad; i++) {
+		glm::ivec4 brickPositions = worldDataSSBO->_brickLoadQueue[i]; // from shaders, we know that it represents ivec3(chunkIndex, columnIndex, brickPosition)
+
+		// retrieve brick index from _chunksDataColumns (contains infos about position of the brick's data inside the chunk vectors, state of the brick...)
+		int intersectionData = _worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y]._brickmaps[brickPositions.z];
+		int brickIndex = intersectionData & BRICKMAP_INDEX_BITS;
+
+		// retieve chunk from cache, giving access to its bricks datas
+		int loadedChunkIndex = brickPositions.x + brickPositions.y * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+		worldgen::BrickChunk* chunk = _worldRenderingData._gpuLoadedChunks.at(loadedChunkIndex);
+
+		// stage loaded brick in CPU side, it will be upload in the SSBO on next frame (in drawWorld function)
+
+		// get chunk data in the chunk column given its y position
+		worldgen::ChunkGpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
+
+		// skip if already loaded by one of the precedent frames (because we have 2 frames with 2 different SSBOS that are not synced together on GPU side, but share the same CPU side datas)
+		if (chunkData->_brickmaps[brickPositions.z] & BRICKMAP_LOADED_BIT)
+			continue;
+
+		// update chunk data that will be send to GPU
+		chunkData->_brickmaps[brickPositions.z] = BRICKMAP_LOADED_BIT | (intersectionData & BRICKMAP_LOD_BITS) | (intersectionData & BRICKMAP_INDEX_BITS);
+		chunkData->_brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+	}
+
+	// reset worlddata queues for next readback
+	_worldRenderingData.resetQueues();
 }
 
 void Engine::initWorld()
@@ -969,7 +1001,7 @@ void Engine::initWorld()
 	glm::ivec3 startingRegion{0,0,0};
 	_cameraController._cameraPosition = glm::vec3{ REGION_VOXEL_RESOLUTION_XZ/2.0f, 257.0f, REGION_VOXEL_RESOLUTION_XZ/2.0f };
 	_world.generateRegion(startingRegion.x, startingRegion.y, startingRegion.z);
-	_worldRenderingData.initChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+	_worldRenderingData.loadChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
 
 	// end time of world generation
 	auto endtime = std::chrono::high_resolution_clock::now();

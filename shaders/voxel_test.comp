@@ -55,15 +55,15 @@ struct ChunksColumnData{
 };
 
 struct WorldData{
-    Brickmap bricksQueue[BRICKMAP_QUEUE_SIZE];
-    uint indicesQueue[BRICKMAP_QUEUE_SIZE];
+    //Brickmap bricksQueue[BRICKMAP_QUEUE_SIZE];
+    //uint indicesQueue[BRICKMAP_QUEUE_SIZE];
 
-    vec3 brickLoadQueue[BRICKMAP_QUEUE_SIZE];
+    ivec4 brickLoadQueue[BRICKMAP_QUEUE_SIZE];
     uint brickLoadQueueCount;
 };
 
 // world SSBO
-layout(std430, set = 1, binding = 0) readonly buffer WorldBuffer{
+layout(std430, set = 1, binding = 0) buffer WorldBuffer{
 
 	WorldData worldData;
 } worldBuffer;
@@ -75,7 +75,7 @@ layout(std430, set = 1, binding = 1) readonly buffer ViewDistanceGridBuffer{
 } viewDistanceGridBuffer;
 
 // chunks SSBO
-layout(std430, set = 1, binding = 2) readonly buffer ChunksBuffer{
+layout(std430, set = 1, binding = 2) buffer ChunksBuffer{
 
 	ChunksColumnData chunksColumnData[];
 } chunksBuffer;
@@ -108,7 +108,7 @@ bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDir
     return intersection;
 }
 
-bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickIndex, vec3 brickNormal) {
+bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) {
     // 3D DDA algorithm
 
     // our brick is a XYZ axis aligned 3d grid composed of voxels
@@ -221,7 +221,6 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     while(true) {
 
         // retrieve the indices of our chunk and our brick
-        uint brickDataIndex = brickIndex & BRICKMAP_INDEX_BIT;
         uint submask = (mapPos.x + mapPos.z * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE) / 32;
         uint voxelIndex = uint(mod(mapPos.x + mapPos.z  * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE, 32));
 
@@ -235,7 +234,7 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 			}
 
             // check chunk intersection
-            Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickDataIndex];
+            Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickPosition];
 
             if((bmapData.presenceMask[submask] & (1 << voxelIndex)) > 0)
             {
@@ -402,9 +401,9 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     while(true) {
 
         // retrieve the indices of our chunk and our brick
-        uint brickIndex = mapPos.x + mapPos.z  * CHUNK_SIZE + mapPos.y * CHUNK_SIZE * CHUNK_SIZE;
+        uint brickPosition = mapPos.x + mapPos.z  * CHUNK_SIZE + mapPos.y * CHUNK_SIZE * CHUNK_SIZE;
 
-        if (brickIndex >= 0) {
+        if (brickPosition >= 0) {
 
             // calculate the distance of the ray to the brick
             // going one step back, because in the DDA steps above we went one step further to end up inside the brick
@@ -417,7 +416,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 			}
 
             // check chunk intersection
-            uint intersect = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickIndex];
+            uint intersect = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition];
 
             float subDistance = 0.f;
 
@@ -429,10 +428,37 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
                 // note : displace the ray given the chunk exit side normal (if we ray goes up, normal will be (0, 1, 0))
                 vec3 newOrigin = rayOrigin + rayDirection * updateTraveledDistance + outNormal * epsilon;
 
-                if(intersectBrick(newOrigin, rayDirection, subDistance, intersectionNormal, chunkIndex, columnIndex, brickIndex, outNormal)) {
+                if(intersectBrick(newOrigin, rayDirection, subDistance, intersectionNormal, chunkIndex, columnIndex, brickPosition, outNormal)) {
                     traveledDistance = updateTraveledDistance + subDistance;
                     return true;
                 }
+            }
+            else if((intersect & BRICKMAP_UNLOADED_BIT) > 0)
+            {
+                // mark the SSBO value as resquested
+                // use atomic operation to prevent other modification of data during the operation
+                // we also retrieve the index value in the buffer before the OR operation
+                uint oldIndex = atomicOr(chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition], BRICKMAP_REQUESTED_BIT);
+
+                // check if the brick was not already requested by another invocation (in this case, we skip it because we will otherwise load it 2 times)
+                if(!((oldIndex & BRICKMAP_REQUESTED_BIT) > 0)) {
+
+                    uint loadIndex = atomicAdd(worldBuffer.worldData.brickLoadQueueCount, 1);
+
+                    if(loadIndex < BRICKMAP_QUEUE_SIZE) {
+                        // request brick to be loaded
+                        worldBuffer.worldData.brickLoadQueue[loadIndex] = ivec4(chunkIndex, columnIndex, brickPosition, 0);
+                    }
+                    else {
+                        // unmark as requested if we already requested the maximum number of bricks
+                        atomicAnd(chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition], ~BRICKMAP_REQUESTED_BIT);
+                    }
+                }
+
+                // we still intersected a brick, we requested its load ant will display it on next frame
+                traveledDistance = updateTraveledDistance;
+                intersectionNormal = -outNormal;
+				return true;
             }
 
         }

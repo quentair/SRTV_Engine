@@ -83,6 +83,7 @@ public:
 	FrameData _frames[FRAME_OVERLAP];
 	int _frameNumber{ 0 };
 	FrameData& getCurrentFrame() { return _frames[_frameNumber]; }
+	FrameData& getFrame(int frameNumber) { return _frames[frameNumber]; }
 
 	// commands
 	void initCommands();
@@ -125,6 +126,7 @@ public:
 
 	// buffers
 	void initBuffers();
+	void readbackBuffers(int frameNumber);
 
 	// world CPU side
 	worldgen::World _world{};
