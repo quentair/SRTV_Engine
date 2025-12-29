@@ -114,7 +114,6 @@ namespace srtv_engine::worldgen {
 
                     for (int i = 0; i < chunk->_indices.size(); i++) {
                         // if brickmap inside the chunk has been generated, just load the LOD and mark it as unloaded for the GPU
-                        // TODO : LODs
                         int brickIndex = chunk->_indices[i] & BRICKMAP_INDEX_BITS;
                         if (chunk->_indices[i] & BRICKMAP_LOADED_BIT) {
                             chunkData->_brickmaps[i] = BRICKMAP_UNLOADED_BIT | (chunk->_indices[i] & BRICKMAP_LOD_BITS) | (chunk->_indices[i] & BRICKMAP_INDEX_BITS);

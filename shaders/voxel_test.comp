@@ -31,8 +31,9 @@ const uint INITIAL_GPU_BRICKMAP_NUMBER = CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE;
 const uint REGION_SIZE_XZ = 32;
 const uint REGION_SIZE_Y = 4;
 
-const uint VIEWDISTANCE = 3;
-const uint VIEW_GRID_SIZE = (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+const uint VIEW_DISTANCE = 3;
+const uint LOD_DISTANCE_2x2 = 2;
+const uint VIEW_GRID_SIZE = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
 const uint BRICKMAP_QUEUE_SIZE = 1024;
 
 const uint BRICKMAP_LOADED_BIT = 536870912;
@@ -108,6 +109,178 @@ bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDir
     return intersection;
 }
 
+bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) {
+    // 3D DDA algorithm
+
+    // our brick is a XYZ axis aligned 3d grid composed of voxels
+    // at each index value, we enter a new cell of the grid (so a new voxel) from a different side
+    // example (x = 2 ; y = 3; z = 1) is one cell in our grid, and at (x = 3 ; y = 3 ; z = 1) we have another cell, and we enter it from the left side (x+1)
+
+    // convert origin position from world space to lod voxels grid position
+    vec3 gridPos = vec3(mod(floor(rayOrigin.x), BRICKMAP_SIZE) + fract(rayOrigin.x), mod(floor(rayOrigin.y), BRICKMAP_SIZE) + fract(rayOrigin.y), mod(floor(rayOrigin.z), BRICKMAP_SIZE) + fract(rayOrigin.z)) / 4.0;
+
+    // origin pos index on lod voxel
+    ivec3 mapPos = ivec3(gridPos.x, gridPos.y, gridPos.z);
+
+    // local out positions of the grid (either -1 or max lod voxel)
+    float outX = 0.0;
+    float outY = 0.0;
+    float outZ = 0.0;
+    if(rayDirection.x < 0.0) {
+        outX = -1.0;
+    } 
+    else {
+        outX = 2;
+    }
+    if(rayDirection.y < 0.0) {
+        outY = -1.0;
+    } 
+    else {
+        outY = 2;
+    }
+    if(rayDirection.z < 0.0) {
+        outZ = -1.0;
+    } 
+    else {
+        outZ = 2;
+    }
+    vec3 outPos  = vec3(outX, outY, outZ);
+
+    // given the ray direction, register the step direction we will take each time on the grid (so from each side we exit our current cell)
+    // exemple : stepZ = 1 means we will go forward one cell (we exit from front side and entere from back side), stepZ = -1 means we will go backward one cell (we exit from back side and enter from front side), if we ever need to step in the Z axis
+    ivec3 steps = ivec3(sign(rayDirection.x), sign(rayDirection.y), sign(rayDirection.z));
+
+    // register, for each axis, the distance the ray goes through if we take one step on this axis (so from one side to the opposite one)
+    // if we simplify it to the maximum, this distance is actually the inverse of the direction
+    // example : we go forward on z axis (so stepZ = 1), so we go in another cell (the one in front of us). In this case, the ray advanced by deltaDistZ unit in the ray direction 
+    float deltaX = 0.0;
+    float deltaY = 0.0;
+    float deltaZ = 0.0;
+
+    // prevent division by 0
+    if(rayDirection.x != 0.0) {
+        deltaX = abs(1.0/rayDirection.x);
+    } 
+    else {
+        deltaX = 100000;
+    }
+    if(rayDirection.y != 0.0) {
+        deltaY = abs(1.0/rayDirection.y);
+    } 
+    else {
+        deltaY = 100000;
+    }
+    if(rayDirection.z != 0.0) {
+        deltaZ = abs(1.0/rayDirection.z);
+    } 
+    else {
+        deltaZ = 100000;
+    }
+
+    vec3 deltaDist = vec3(deltaX, deltaY, deltaZ);
+
+    // compute the first distance the ray has to travel to go from its starting position to the exit sides of the starting cell
+    float sideX = 0.0;
+    float sideY = 0.0;
+    float sideZ = 0.0;
+    if(rayDirection.x < 0.0) {
+        // left side (stepX = -1)
+        sideX = (gridPos.x - mapPos.x) * deltaDist.x;
+    } 
+    else {
+        // right side (stepX = 1)
+        sideX = (mapPos.x + 1.0 - gridPos.x) * deltaDist.x;
+    }
+    if(rayDirection.y < 0.0) {
+        // down side (stepY = -1)
+        sideY = (gridPos.y - mapPos.y) * deltaDist.y;
+    } 
+    else {
+        // up side (stepY = 1)
+        sideY = (mapPos.y + 1.0 - gridPos.y) * deltaDist.y;
+    }
+    if(rayDirection.z < 0.0) {
+        // back side (stepZ = -1)
+        sideZ = (gridPos.z - mapPos.z) * deltaDist.z;
+    } 
+    else {
+        // front side (stepZ = 1)
+        sideZ = (mapPos.z + 1.0 - gridPos.z) * deltaDist.z;
+    }
+    vec3 sideDist  = vec3(sideX, sideY, sideZ);
+
+    // last axis we stepped onto
+    int stepAxis = -1;
+
+    // normal of our lod voxel side (begin by the side from which we exited our brick)
+    vec3 outNormal = brickNormal;
+
+    // DDA
+    while(true) {
+
+        // retrieve the indices of our lod voxel
+        uint voxelIndex = (mapPos.x + mapPos.y * 2 + mapPos.z * 4);
+
+        // retrieve LOD from chunk intersection infos
+        uint LOD_Info = (chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition] & BRICKMAP_LOD_BIT) >> 12;
+
+        // calculate the distance of the ray to the lod voxel
+        // going one step back, because in the DDA steps above we went one step further to end up inside the voxel
+		float updateTraveledDistance = 0.f;
+		if (stepAxis != -1) {
+			updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
+            // multiply by 4 because a 2x2x2 LOD brick is 4 voxels (so we scale lod voxel grid position by 4 to obtain world position)
+            updateTraveledDistance *= 4;
+		}
+
+        if((LOD_Info & (1 << voxelIndex)) > 0)
+        {
+            traveledDistance = updateTraveledDistance;
+            // transfer voxel normal for light calculation (inversed because outNormal is the normal of the side where we exited the last element, be it a brick or a voxel, and we entered from the opposite side, so opposite normal)
+            intersectionNormal = -outNormal;
+            return true;
+        }
+
+        // jump to next lod voxel, either in x-direction, y-direction, or z-direction
+        if (sideDist.x < sideDist.y)
+        {
+            if (sideDist.x < sideDist.z) {
+                sideDist.x += deltaDist.x;
+                mapPos.x += steps.x;
+                outNormal = ivec3(1, 0, 0) * steps.x;
+                stepAxis = 0;
+            }
+            else {
+                sideDist.z += deltaDist.z;
+                mapPos.z += steps.z;
+                outNormal = ivec3(0, 0, 1) * steps.z;
+                stepAxis = 2;
+            }
+        }
+        else
+        {
+            if (sideDist.y < sideDist.z) {
+                sideDist.y += deltaDist.y;
+                mapPos.y += steps.y;
+                outNormal = ivec3(0, 1, 0) * steps.y;
+                stepAxis = 1;
+            }
+            else {
+                sideDist.z += deltaDist.z;
+                mapPos.z += steps.z;
+                outNormal = ivec3(0, 0, 1) * steps.z;
+                stepAxis = 2;
+            }
+        }
+
+        // check if we are out of our chunk
+        if (mapPos[stepAxis] == outPos[stepAxis])
+			break;
+    }
+
+    return false;
+}
+
 bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) {
     // 3D DDA algorithm
 
@@ -118,13 +291,10 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     // convert origin position from world space to voxels grid position
     vec3 gridPos = vec3(mod(floor(rayOrigin.x), BRICKMAP_SIZE) + fract(rayOrigin.x), mod(floor(rayOrigin.y), BRICKMAP_SIZE) + fract(rayOrigin.y), mod(floor(rayOrigin.z), BRICKMAP_SIZE) + fract(rayOrigin.z));
 
-    // convert local origin to brickmaps grid position
-    //vec3 gridPos = localOrigin / float(BRICKMAP_SIZE);
-
-    // origin pos index on chunk
+    // origin pos index on brick
     ivec3 mapPos = ivec3(gridPos.x, gridPos.y, gridPos.z);
 
-    // local out positions of the grid (either -1 or max brick)
+    // local out positions of the grid (either -1 or max voxel)
     float outX = 0.0;
     float outY = 0.0;
     float outZ = 0.0;
@@ -220,20 +390,20 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     // DDA
     while(true) {
 
-        // retrieve the indices of our chunk and our brick
+        // retrieve the indices of our sumbask and our voxel
         uint submask = (mapPos.x + mapPos.z * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE) / 32;
         uint voxelIndex = uint(mod(mapPos.x + mapPos.z  * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE, 32));
 
         if (voxelIndex >= 0) {
 
-            // calculate the distance of the ray to the brick
-            // going one step back, because in the DDA steps above we went one step further to end up inside the brick
+            // calculate the distance of the ray to the voxel
+            // going one step back, because in the DDA steps above we went one step further to end up inside the voxel
 			float updateTraveledDistance = 0.f;
 			if (stepAxis != -1) {
 				updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
 			}
 
-            // check chunk intersection
+            // check chunk intersection infos
             Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickPosition];
 
             if((bmapData.presenceMask[submask] & (1 << voxelIndex)) > 0)
@@ -246,7 +416,7 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 
         }
 
-        // jump to next brick, either in x-direction, y-direction, or z-direction
+        // jump to next voxel, either in x-direction, y-direction, or z-direction
         if (sideDist.x < sideDist.y)
         {
             if (sideDist.x < sideDist.z) {
@@ -415,12 +585,30 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
                 updateTraveledDistance *= BRICKMAP_SIZE;
 			}
 
-            // check chunk intersection
+            // check chunk intersection infos
             uint intersect = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition];
 
             float subDistance = 0.f;
 
-            if((intersect & BRICKMAP_LOADED_BIT) > 0)
+            // radius distance at which we will display LODs
+            uint LodDistance2x2Squared = LOD_DISTANCE_2x2 *  CHUNK_VOXEL_RESOLUTION * LOD_DISTANCE_2x2 *  CHUNK_VOXEL_RESOLUTION;
+
+            vec3 difference = (rayOrigin + updateTraveledDistance * rayDirection) - CameraPushConstant.position.xyz;
+            float traveledDistanceSquared = dot(difference, difference);
+
+            if(traveledDistanceSquared > LodDistance2x2Squared) {
+                // world position at which we intersect our chunk
+                float epsilon = 0.005f;
+
+                // note : displace the ray given the chunk exit side normal (if we ray goes up, normal will be (0, 1, 0))
+                vec3 newOrigin = rayOrigin + rayDirection * updateTraveledDistance + outNormal * epsilon;
+
+                if(intersectLOD(newOrigin, rayDirection, subDistance, intersectionNormal, chunkIndex, columnIndex, brickPosition, outNormal)) {
+                    traveledDistance = updateTraveledDistance + subDistance;
+                    return true;
+                }
+            }
+            else if((intersect & BRICKMAP_LOADED_BIT) > 0)
             {
                 // world position at which we intersect our chunk
                 float epsilon = 0.005f;
@@ -512,7 +700,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
 
     // convert origin position from world space to viewgrid local space (y coordinates are not really important here because we sample our 2D viewgrid)
     // note : player is always at the center cell of the viewgrid
-    ivec2 viewGridCenter = ivec2(VIEWDISTANCE, VIEWDISTANCE);
+    ivec2 viewGridCenter = ivec2(VIEW_DISTANCE, VIEW_DISTANCE);
 
     vec3 localOrigin = vec3(CHUNK_VOXEL_RESOLUTION * viewGridCenter.x + mod(floor(rayOrigin.x), CHUNK_VOXEL_RESOLUTION) + fract(rayOrigin.x), rayOrigin.y, CHUNK_VOXEL_RESOLUTION * viewGridCenter.y + mod(floor(rayOrigin.z), CHUNK_VOXEL_RESOLUTION) + fract(rayOrigin.z));
 
@@ -530,7 +718,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         outX = -1.0;
     } 
     else {
-        outX = VIEWDISTANCE * 2 + 1;
+        outX = VIEW_DISTANCE * 2 + 1;
     }
     if(rayDirection.y < 0.0) {
         outY = -1.0;
@@ -542,7 +730,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         outZ = -1.0;
     } 
     else {
-        outZ = VIEWDISTANCE * 2 + 1;
+        outZ = VIEW_DISTANCE * 2 + 1;
     }
     ivec3 outPos  = ivec3(outX, outY, outZ);
 
@@ -620,7 +808,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
     while(true) {
 
         // retrieve index of our column of chunks
-        uint chunkColumnIndex = mapPos.x + mapPos.z * (VIEWDISTANCE * 2 + 1);
+        uint chunkColumnIndex = mapPos.x + mapPos.z * (VIEW_DISTANCE * 2 + 1);
 
         // calculate the distance of the ray to the intersected chunk
         // going one step back, because in the DDA steps above we went one step further to end up inside a chunk
@@ -634,7 +822,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
 
         float subDistance = 0.f;
 
-        // check viewgrid cell intersection
+        // check viewgrid cell intersection infos
         uint intersect = viewDistanceGridBuffer.viewDistanceGrid[chunkColumnIndex];
 
         if(intersect > 0)
