@@ -698,17 +698,21 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
     // at each index value, we enter a new chunk from a different side
     // example (x = 2; z = 1) is one cell in our grid, and at (x = 3; z = 1) we have another cell, and we enter it from the left side (x+1). If we nether stepped in the y axis, the chunk in the column is the one at the ray origin height
 
-    // convert origin position from world space to viewgrid local space (y coordinates are not really important here because we sample our 2D viewgrid)
-    // note : player is always at the center cell of the viewgrid
+    // convert origin position from world space to viewgrid local space
+    // note : camera is always at the center cell of the viewgrid
     ivec2 viewGridCenter = ivec2(VIEW_DISTANCE, VIEW_DISTANCE);
 
-    vec3 localOrigin = vec3(CHUNK_VOXEL_RESOLUTION * viewGridCenter.x + mod(floor(rayOrigin.x), CHUNK_VOXEL_RESOLUTION) + fract(rayOrigin.x), rayOrigin.y, CHUNK_VOXEL_RESOLUTION * viewGridCenter.y + mod(floor(rayOrigin.z), CHUNK_VOXEL_RESOLUTION) + fract(rayOrigin.z));
+    vec3 cameraPosition = CameraPushConstant.position.xyz;
+
+    vec3 rayDisplacement = rayOrigin - cameraPosition;
+
+    vec3 localOrigin = vec3(CHUNK_VOXEL_RESOLUTION * viewGridCenter.x + mod(floor(cameraPosition.x), CHUNK_VOXEL_RESOLUTION) + fract(cameraPosition.x), cameraPosition.y, CHUNK_VOXEL_RESOLUTION * viewGridCenter.y + mod(floor(cameraPosition.z), CHUNK_VOXEL_RESOLUTION) + fract(cameraPosition.z)) + rayDisplacement;
 
     // convert local origin to 3D grid position
-    vec3 gridPos = vec3(localOrigin.x / float(CHUNK_VOXEL_RESOLUTION), rayOrigin.y / float(CHUNK_VOXEL_RESOLUTION), localOrigin.z / float(CHUNK_VOXEL_RESOLUTION));
+    vec3 gridPos = vec3(localOrigin.x / float(CHUNK_VOXEL_RESOLUTION), localOrigin.y / float(CHUNK_VOXEL_RESOLUTION), localOrigin.z / float(CHUNK_VOXEL_RESOLUTION));
 
     // origin pos index on the 3D grid
-    ivec3 mapPos = ivec3(viewGridCenter.x, floor(rayOrigin.y / float(CHUNK_VOXEL_RESOLUTION)), viewGridCenter.y);
+    ivec3 mapPos = ivec3(gridPos.x, gridPos.y, gridPos.z);
 
     // out positions of the 3D grid (either -1 or viewgrid max index for X and Z axis, and -1 or maximum column height for Y axis)
     float outX = 0.0;
@@ -914,7 +918,7 @@ void main()
     // sunlight setup
     Sunlight sun;
     sun.lightDir = vec3(0.3, -0.3, 0.8);
-    sun.lightColor = vec3(0.8, 0.2, 0.1);
+    sun.lightColor = vec3(0.6, 0.4, 0.2);
 
     // traveled distance
     float t = 0;
@@ -925,6 +929,8 @@ void main()
     // intersection test with our terrain (DDA algorithm)
     bool intersection = intersectViewGrid(ray.origin, ray.direction, t, intersectionNormal);
 
+    vec3 hitPoint = ray.origin + ray.direction * t;
+
     if(intersection) {
         // light calculation
         vec3 norm = normalize(intersectionNormal);
@@ -932,8 +938,22 @@ void main()
 
         float diffuse = max(dot(norm, lightDir), 0.0);
         vec3 diffuseLightColor = diffuse * sun.lightColor;
+        
+        // shadow calculation
+        // shoot a ray from our voxel hit point in the direction of the sun
+        // if we hit something, the voxel is occluded, thus in shadow
+        float epsilon = 0.005f;
+        vec3 newOrigin = normalize(-sun.lightDir) * epsilon + hitPoint;
+        vec3 intersectionNormalShadow = ivec3(0,0,0);
+        float tShadow = 0;
+        float shadowFactor = 1.0;
 
-        color = vec4((diffuseLightColor + ambientLightColor), 1.0) * voxelColor;
+        bool inShadow = intersectViewGrid(newOrigin, -sun.lightDir, tShadow, intersectionNormalShadow);
+
+        if(inShadow)
+            shadowFactor = 0.0;
+
+        color = vec4((diffuseLightColor * shadowFactor) + ambientLightColor, 1.0) * voxelColor;
     }
 
     imageStore(image, texelCoord, color);
