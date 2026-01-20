@@ -17,13 +17,13 @@ int main(int argc, char* argv[]) {
 
 	//srtv_engine::ENGINE_LOG_FATAL("FATAL_TEST");
 
-	srtv_engine::Engine engine{};
+	std::unique_ptr<srtv_engine::Engine> engine = std::make_unique<srtv_engine::Engine>();
 
-	engine.init();
+	engine->init();
 
-	engine.run();
+	engine->run();
 
-	engine.cleanup();
+	engine->cleanup();
 
 	return 0;
 }

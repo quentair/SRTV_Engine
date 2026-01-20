@@ -48,8 +48,13 @@ class GpuWorld {
 	// Buffer3 : data of chunks organised into columns of chunks
 	std::vector<ChunksColumnGpuData> _chunksDataColumns = std::vector<ChunksColumnGpuData>(VIEW_GRID_SIZE);
 
-	//  quick access to chunks cached for the GPU
+	//  quick access to chunks whose datas are cached for the GPU
 	std::array<BrickChunk*, VIEW_GRID_SIZE * REGION_SIZE_Y> _gpuLoadedChunks;
+	std::vector<std::pair<BrickChunk*, ChunkGpuData>> _tempChunks; // temporary chunk pointer and data vector to displace them instead of reloading them if they are still in the grid but moved from cell
+
+	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
+
+	void saveChunks(glm::vec3 playerWorldPos);
 
 	bool loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
 

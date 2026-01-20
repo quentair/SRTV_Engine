@@ -27,7 +27,7 @@ public:
 
 	Engine() = default;
 
-	inline bool isRunning() { return _isInitialized; }
+	inline bool isRunning() const { return _isInitialized; }
 
 	void init();
 
@@ -42,6 +42,10 @@ public:
 	bool _isInitialized{ false };
 	bool _stopRendering{ false };
 	bool _resize{ false };
+
+	// threads
+	std::thread _worldGenerationThread;
+	std::atomic<bool> _terminateWorldGenerationThread = false;
 
 	// instance
 	bool _useValidationLayers{ true };
@@ -131,6 +135,8 @@ public:
 	// world CPU side
 	worldgen::World _world{};
 	void initWorld();
+	void initWorldGenerationThread();
+	void worldGenerationThread();
 
 	// world data for rendering
 	worldgen::GpuWorld _worldRenderingData{};

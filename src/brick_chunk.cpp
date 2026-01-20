@@ -8,7 +8,7 @@ uint32_t BrickChunk::posToIndex(uint8_t x, uint8_t y, uint8_t z) const
 {
 	// x = (0,CHUNK_SIZE - 1) ; y = (0,CHUNK_SIZE - 1) , z = (0,CHUNK_SIZE - 1) for CHUNK_SIZE^3 brickmaps chunk (indexed from 0 to CHUNK_SIZE^3 - 1)
 
-	// return the index of the brickmap at given local position (so range between 0 and 4095)
+	// return the index of the brickmap at given chunk's brickmaps grid position (so range between 0 and 4095)
 	return x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
 }
 
@@ -21,9 +21,9 @@ uint32_t BrickChunk::getBrickmapState(uint32_t index) const
 	return index & stateMask;
 }
 
-void BrickChunk::generate(uint8_t regionX, uint8_t regionY, uint8_t regionZ)
+void BrickChunk::generate(uint16_t x, uint16_t y, uint16_t z)
 {
-	// generate a chunk made of brickmaps at given local position inside a region
+	// generate a chunk made of brickmaps at given world position
 
 	// for each column of voxel inside our chunk, store the height of the column
 	// so it describes the shape of our terrain
@@ -56,8 +56,8 @@ void BrickChunk::generate(uint8_t regionX, uint8_t regionY, uint8_t regionZ)
 						float height = heightValues[(chunkX * BRICKMAP_SIZE + brickmapX) + ((chunkZ * BRICKMAP_SIZE + brickmapZ) * CHUNK_VOXEL_RESOLUTION)];
 						
 						for (uint8_t brickmapY = 0; brickmapY < BRICKMAP_SIZE; brickmapY++) {
-							// generate only if there are voxels to generate in the brickmap (this means the random height reached this brickmap xz plan)
-							if ((regionY * CHUNK_SIZE + chunkY) * BRICKMAP_SIZE + brickmapY < height) {
+							// generate only if there are voxels to generate in the brickmap (this means the random height reached this brickmap lowest xz plan)
+							if (y + chunkY * BRICKMAP_SIZE + brickmapY < height) {
 								brick.notifyVoxelPresence(brickmapX, brickmapY, brickmapZ);
 								generated = true;
 								//lod_4x4x4 |= 1 << (((brickmapX & 0b110) >> 1) + ((brickmapZ & 0b110) << 1) + ((brickmapY & 0b110) << 3));
@@ -76,6 +76,9 @@ void BrickChunk::generate(uint8_t regionX, uint8_t regionY, uint8_t regionZ)
 			}
 		}
 	}
+
+	// declare chunk as generated
+	_generated = true;
 }
 
 } // namespace srtv_engine::worldgen

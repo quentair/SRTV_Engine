@@ -45,6 +45,8 @@ void Engine::init()
 
 	initWorld();
 
+	initWorldGenerationThread();
+
 	_isInitialized = true;
 }
 
@@ -177,7 +179,7 @@ void Engine::run()
 		while (SDL_PollEvent(&e)) {
 
 			if (e.type == SDL_EVENT_KEY_DOWN) {
-				ENGINE_LOG_TRACE(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
+				//ENGINE_LOG_DEBUG(fmt::format("Key pressed : {}", SDL_GetKeyName(e.key.key)));
 				if (e.key.key == SDLK_CAPSLOCK) {
 					SDL_SetWindowRelativeMouseMode(_window, _relativeMode = !_relativeMode);
 				}
@@ -232,6 +234,10 @@ void Engine::cleanup()
 	if (_isInitialized) {
 		//make sure the gpu has stopped doing its things
 		vkDeviceWaitIdle(_device);
+
+		// end the different threads
+		_terminateWorldGenerationThread = true;
+		_worldGenerationThread.join();
 
 		// destroy ImGui implementation before destroying its allocated descriptors and pools
 		ImGui_ImplVulkan_Shutdown();
@@ -730,7 +736,12 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	// update chunks to render
 	
 	_worldRenderingData.resetChunks();
-	_worldRenderingData.loadChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+
+	// lock generated region vector access and read it, we will write on it on the world generator thread after the read operation
+	{
+		const std::lock_guard<std::mutex> lock(_world._generatedRegionsMutex);
+		_worldRenderingData.loadRegions(_world._generatedRegions, _cameraController._cameraPosition);
+	}
 
 	// write into each world generation SSBO
 	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getCurrentFrame()._worldDataBufferAllocInfo.pMappedData;
@@ -971,7 +982,7 @@ void Engine::readbackBuffers(int frameNumber)
 
 		// retieve chunk from cache, giving access to its bricks datas
 		int loadedChunkIndex = brickPositions.x + brickPositions.y * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
-		worldgen::BrickChunk* chunk = _worldRenderingData._gpuLoadedChunks.at(loadedChunkIndex);
+		worldgen::BrickChunk* chunk = _worldRenderingData._gpuLoadedChunks[loadedChunkIndex];
 
 		// stage loaded brick in CPU side, it will be upload in the SSBO on next frame (in drawWorld function)
 
@@ -993,22 +1004,43 @@ void Engine::readbackBuffers(int frameNumber)
 
 void Engine::initWorld()
 {
-	ENGINE_LOG_TRACE("Generating world...");
+	ENGINE_LOG_TRACE("Generating starting region...");
 
 	// start time of world generation
 	auto beginTime = std::chrono::high_resolution_clock::now();
 
-	glm::ivec3 startingRegion{0,0,0};
-	_cameraController._cameraPosition = glm::vec3{ REGION_VOXEL_RESOLUTION_XZ/2.0f, 257.0f, REGION_VOXEL_RESOLUTION_XZ/2.0f };
-	_world.generateRegion(startingRegion.x, startingRegion.y, startingRegion.z);
-	_worldRenderingData.loadChunks(*_world.getRegion(0, 0, 0), _cameraController._cameraPosition);
+	glm::ivec3 startingRegionPos{0,0,0};
+	srtv_engine::worldgen::WorldRegion* startingRegion;
+
+	_cameraController._cameraPosition = glm::vec3{ 0.f, 257.0f, 0.f };
+	_world.generateRegion(startingRegionPos.x, startingRegionPos.y, startingRegionPos.z, _terminateWorldGenerationThread);
+
+	startingRegion = _world.getRegion(startingRegionPos.x, startingRegionPos.y, startingRegionPos.z);
+	_worldRenderingData.loadChunks(*startingRegion, _cameraController._cameraPosition);
 
 	// end time of world generation
 	auto endtime = std::chrono::high_resolution_clock::now();
 	// duration of world generation
 	float worldGenTime = std::chrono::duration<float, std::chrono::seconds::period>(endtime - beginTime).count();
 
-	ENGINE_LOG_TRACE(fmt::format("World generation completed (took {} seconds)", worldGenTime));
+	ENGINE_LOG_TRACE(fmt::format("Starting region generation completed (took {} seconds)", worldGenTime));
+}
+
+void Engine::initWorldGenerationThread()
+{
+	ENGINE_LOG_TRACE("Starting world generation thread...");
+
+	_worldGenerationThread = std::thread{ &Engine::worldGenerationThread, this };
+}
+
+void Engine::worldGenerationThread()
+{
+	// continuously generate regions around player position and save them in a vector
+	// this vector will be used to retrieve the generated chunks from the different regions, and then send them to the GPU if they are in viewing range
+	while (!(_terminateWorldGenerationThread.load())) {
+		_world.generateRegionsAroundPosition(_cameraController._cameraPosition.x, _cameraController._cameraPosition.y, _cameraController._cameraPosition.z, _terminateWorldGenerationThread);
+	}
+	ENGINE_LOG_TRACE("Terminating world generation thread...");
 }
 
 } // namespace srtv_engine

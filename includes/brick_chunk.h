@@ -38,14 +38,21 @@ class BrickChunk {
 	//std::array<uint32_t*, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE> _gpuIndices;
 
 	// GPU data size for the chunk
-	int _gpuBrickmapsCount = INITIAL_GPU_BRICKMAPS_NUMBER; // number of brickmaps we can send to the GPU (start with one surface worth of brickmaps)
-	int _gpuHighestBrickmapNumber = 0; // highest encountered number of brickmaps to load for the GPU
+	//int _gpuBrickmapsCount = INITIAL_GPU_BRICKMAPS_NUMBER; // number of brickmaps we can send to the GPU (start with one surface worth of brickmaps)
+	//int _gpuHighestBrickmapNumber = 0; // highest encountered number of brickmaps to load for the GPU
 
 	uint32_t posToIndex(uint8_t x, uint8_t y, uint8_t z) const;
 
 	uint32_t getBrickmapState(uint32_t index) const;
 
-	void generate(uint8_t regionX, uint8_t regionY, uint8_t regionZ);
+	void generate(uint16_t x, uint16_t y, uint16_t z);
+
+	bool isGenerated() const {
+		return _generated;
+	}
+
+  private :
+	  bool _generated = false;
 };
 
 } // namespace srtv_engine::worldgen
