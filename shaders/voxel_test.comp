@@ -569,10 +569,6 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         // retrieve the indices of our chunk and our brick
         uint brickPosition = mapPos.x + mapPos.z  * CHUNK_SIZE + mapPos.y * CHUNK_SIZE * CHUNK_SIZE;
 
-        if (brickPosition >= CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE) {
-            break;
-        }
-
         // calculate the distance of the ray to the brick
         // going one step back, because in the DDA steps above we went one step further to end up inside the brick
 		float updateTraveledDistance = 0.f;
@@ -822,7 +818,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
 
         float subDistance = 0.f;
 
-        // check viewgrid cell intersection infos
+        // check viewgrid cell intersection infos (is column of chunks present or not)
         uint intersect = viewDistanceGridBuffer.viewDistanceGrid[chunkColumnIndex];
 
         if(intersect > 0)

@@ -38,12 +38,14 @@ void World::generateRegion(int x, int y, int z, std::atomic<bool>& stopGeneratio
 
         _regionsHashmap[glm::ivec3(x, y, z)] = std::make_unique<WorldRegion>();
 
-        _regionsHashmap[glm::ivec3(x, y, z)]->init(x, y, z);
+        region = _regionsHashmap[glm::ivec3(x, y, z)].get();
+
+        region->init(x, y, z);
 
         // lock generated region vector access and write on it, we will read it on the main thread after the write operation
         {
             const std::lock_guard<std::mutex> lock(_generatedRegionsMutex);
-            _generatedRegions.push_back(getRegion(x, y, z));
+            _generatedRegions.push_back(region);
         }
         
         _regionsHashmap[glm::ivec3(x, y, z)]->generate(stopGeneration);

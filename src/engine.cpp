@@ -686,7 +686,7 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	// bind the descriptor set containing the draw image for the compute pipeline
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
 
-	ComputeShaderCameraPushConstant pc;
+	ComputeShaderCameraPushConstant pc{};
 	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
@@ -769,7 +769,7 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	// same for SSBOs (set at set 1)
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 1, 1, &getCurrentFrame()._worldgenDescriptorSet, 0, nullptr);
 
-	ComputeShaderCameraPushConstant pc;
+	ComputeShaderCameraPushConstant pc{};
 	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);

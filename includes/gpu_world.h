@@ -5,7 +5,10 @@
 #include "world_region.h"
 #include "buffer.h"
 
-#include <memory>
+#include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 #include <unordered_map>
 
 // max number of brickmaps to send to GPU for loading
@@ -50,7 +53,10 @@ class GpuWorld {
 
 	//  quick access to chunks whose datas are cached for the GPU
 	std::array<BrickChunk*, VIEW_GRID_SIZE * REGION_SIZE_Y> _gpuLoadedChunks;
-	std::vector<std::pair<BrickChunk*, ChunkGpuData>> _tempChunks; // temporary chunk pointer and data vector to displace them instead of reloading them if they are still in the grid but moved from cell
+	std::unordered_map<glm::ivec3, ChunkGpuData> _tempChunks; // temporary chunk data hashmap to displace them instead of reloading them if they are still in the grid but moved from cell
+
+	// world position of the chunk where the player was last situated
+	glm::ivec3 _playerLastChunk{ 0, -1, 0 };
 
 	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
 
