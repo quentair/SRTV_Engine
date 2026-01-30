@@ -19,9 +19,9 @@ namespace srtv_engine::worldgen {
 // x : horizontal axis ; y : vertical axis ; z : depth axis
 class WorldRegion {
 public:
-	std::vector<std::unique_ptr<BrickChunk>> _chunks;
+	std::vector<std::unique_ptr<BrickChunk>> _chunks = std::vector<std::unique_ptr<BrickChunk>>(REGION_SIZE_XZ * REGION_SIZE_Y * REGION_SIZE_XZ);
 
-	glm::ivec3 _worldPos = glm::ivec3{};
+	glm::ivec3 _worldPos;
 
 	glm::ivec3 indexToLocalPos(int index) const;
 
@@ -30,8 +30,6 @@ public:
 	uint32_t localPosToIndex(uint8_t x, uint8_t y, uint8_t z) const;
 
 	void init(int x, int y, int z) {
-		const uint32_t regionCount = REGION_SIZE_XZ * REGION_SIZE_Y * REGION_SIZE_XZ;
-		_chunks.resize(regionCount);
 		_worldPos = glm::ivec3(x * REGION_VOXEL_RESOLUTION_XZ, y * REGION_VOXEL_RESOLUTION_Y, z * REGION_VOXEL_RESOLUTION_XZ);
 	}
 

@@ -1,5 +1,7 @@
 #include "gpu_world.h"
 
+#include <algorithm>
+
 namespace srtv_engine::worldgen {
 
 void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos)
@@ -82,8 +84,8 @@ bool GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
     }
 
     // limit grid coordinates to sample between [0, 0, 0] and [REGION_SIZE_XZ - 1, 0, REGION_SIZE_XZ - 1]
-    glm::ivec3 chunkGridBottomLeftCorner = glm::ivec3( std::min(std::max(viegGridBottomLeftCorner.x, 0), REGION_SIZE_XZ - 1), 0, std::min(std::max(viegGridBottomLeftCorner.z, 0), REGION_SIZE_XZ - 1) );
-    glm::ivec3 chungGirdUpperRightCorner = glm::ivec3( std::min(std::max(viewGridUpperRightCorner.x, 0), REGION_SIZE_XZ - 1), 0, std::min(std::max(viewGridUpperRightCorner.z, 0), REGION_SIZE_XZ - 1) );
+    glm::ivec3 chunkGridBottomLeftCorner = glm::ivec3( std::clamp(viegGridBottomLeftCorner.x, 0, REGION_SIZE_XZ - 1), 0, std::clamp(viegGridBottomLeftCorner.z, 0, REGION_SIZE_XZ - 1) );
+    glm::ivec3 chungGirdUpperRightCorner = glm::ivec3( std::clamp(viewGridUpperRightCorner.x, 0, REGION_SIZE_XZ - 1), 0, std::clamp(viewGridUpperRightCorner.z, 0, REGION_SIZE_XZ - 1) );
 
     // load all chunks of the region inside view distance
     for (int xRegion = chunkGridBottomLeftCorner.x; xRegion <= chungGirdUpperRightCorner.x; xRegion++) {

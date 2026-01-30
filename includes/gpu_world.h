@@ -9,6 +9,8 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 
+#include <array>
+#include <vector>
 #include <unordered_map>
 
 // max number of brickmaps to send to GPU for loading
@@ -52,7 +54,7 @@ class GpuWorld {
 	std::vector<ChunksColumnGpuData> _chunksDataColumns = std::vector<ChunksColumnGpuData>(VIEW_GRID_SIZE);
 
 	//  quick access to chunks whose datas are cached for the GPU
-	std::array<BrickChunk*, VIEW_GRID_SIZE * REGION_SIZE_Y> _gpuLoadedChunks;
+	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(VIEW_GRID_SIZE * REGION_SIZE_Y);
 	std::unordered_map<glm::ivec3, ChunkGpuData> _tempChunks; // temporary chunk data hashmap to displace them instead of reloading them if they are still in the grid but moved from cell
 
 	// world position of the chunk where the player was last situated
