@@ -9,6 +9,7 @@
 #include "camera_control.h"
 #include "world.h"
 #include "gpu_world.h"
+#include "world_generator.h"
 
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -140,6 +141,9 @@ public:
 
 	// world data for rendering
 	worldgen::GpuWorld _worldRenderingData{};
+
+	// world generation
+	worldgen::WorldGenerator _worldGenerator{};
 };
 
 } // namespace srtv_engine

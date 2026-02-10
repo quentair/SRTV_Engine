@@ -67,6 +67,12 @@ add_executable(SRTVEngine
 
 	gpu_world.cpp
 	${INCLUDE_DIR}/gpu_world.h
+
+	world_generator.cpp
+	${INCLUDE_DIR}/world_generator.h
+
+	world_generator.cpp
+	${INCLUDE_DIR}/parameters.h
 	)
 
 ## add include files

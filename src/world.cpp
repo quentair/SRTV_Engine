@@ -2,18 +2,18 @@
 
 namespace srtv_engine::worldgen {
 
-void World::generateRegionsAroundPosition(float x, float y, float z, std::atomic<bool>& stopGeneration)
+void World::generateRegionsAroundPlayerPosition(float xPlayer, float yPlayer, float zPlayer, WorldGenerator& worldGenerator, std::atomic<bool>& stopGeneration)
 {
-    // get the 8 regions around the given world position as well as the center region and generate them if needed
+    // get the 8 regions around the player as well as the region he is in, and generate them if needed
 
-    glm::ivec3 actualRegion = glm::ivec3(floor(x / REGION_VOXEL_RESOLUTION_XZ), floor(y / REGION_VOXEL_RESOLUTION_Y), floor(z / REGION_VOXEL_RESOLUTION_XZ));
+    glm::ivec3 actualRegion = glm::ivec3(floor(xPlayer / REGION_VOXEL_RESOLUTION_XZ), floor(yPlayer / REGION_VOXEL_RESOLUTION_Y), floor(zPlayer / REGION_VOXEL_RESOLUTION_XZ));
     
     for (int dx = -1; dx < 2; dx++) {
         for (int dz = -1; dz < 2; dz++) {
             if (stopGeneration.load()) {
                 return;
             }
-            generateRegion(actualRegion.x + dx, actualRegion.y, actualRegion.z + dz, stopGeneration);
+            generateRegion(xPlayer, yPlayer, zPlayer, actualRegion.x + dx, actualRegion.y, actualRegion.z + dz, worldGenerator, stopGeneration);
         }
     }
 }
@@ -29,26 +29,27 @@ WorldRegion* World::getRegion(int x, int y, int z)
         return nullptr;
 }
 
-void World::generateRegion(int x, int y, int z, std::atomic<bool>& stopGeneration)
+void World::generateRegion(float xPlayer, float yPlayer, float zPlayer, int xRegion, int yRegion, int zRegion, WorldGenerator& worldGenerator, std::atomic<bool>& stopGeneration)
 {
     // generate the region (chunk and all) at the given position on the world's region grid
 
-    WorldRegion* region = getRegion(x, y, z);
+    WorldRegion* region = getRegion(xRegion, yRegion, zRegion);
     if (region == nullptr) {
 
-        _regionsHashmap[glm::ivec3(x, y, z)] = std::make_unique<WorldRegion>();
+        _regionsHashmap[glm::ivec3(xRegion, yRegion, zRegion)] = std::make_unique<WorldRegion>();
 
-        region = _regionsHashmap[glm::ivec3(x, y, z)].get();
+        region = _regionsHashmap[glm::ivec3(xRegion, yRegion, zRegion)].get();
 
-        region->init(x, y, z);
+        region->init(xRegion, yRegion, zRegion);
 
         // lock generated region vector access and write on it, we will read it on the main thread after the write operation
         {
-            const std::lock_guard<std::mutex> lock(_generatedRegionsMutex);
-            _generatedRegions.push_back(region);
+            const std::lock_guard<std::mutex> lock(_registeredRegionsMutex);
+            _registeredRegions.push_back(region);
         }
         
-        _regionsHashmap[glm::ivec3(x, y, z)]->generate(stopGeneration);
+        //_regionsHashmap[glm::ivec3(x, y, z)]->generate(stopGeneration);
+        worldGenerator.generateRegion(*region, glm::vec3(xPlayer, yPlayer, zPlayer), stopGeneration);
     }
 }
 
@@ -74,9 +75,9 @@ void World::clearRegionsFarFromPositon(float x, float y, float z)
     }
 
     // don't forget to also clear from generated regions sharing vector to avoid dangling pointers
-    for (auto it = _generatedRegions.begin(); it != _generatedRegions.end();) {
+    for (auto it = _registeredRegions.begin(); it != _registeredRegions.end();) {
         if (*it == nullptr) {
-            it = _generatedRegions.erase(it);
+            it = _registeredRegions.erase(it);
         }
         else {
             ++it;

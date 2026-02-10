@@ -739,8 +739,8 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 
 	// lock generated region vector access and read it, we will write on it on the world generator thread after the read operation
 	{
-		const std::lock_guard<std::mutex> lock(_world._generatedRegionsMutex);
-		_worldRenderingData.loadRegions(_world._generatedRegions, _cameraController._cameraPosition);
+		const std::lock_guard<std::mutex> lock(_world._registeredRegionsMutex);
+		_worldRenderingData.loadRegions(_world._registeredRegions, _cameraController._cameraPosition);
 	}
 
 	// write into each world generation SSBO
@@ -1013,7 +1013,7 @@ void Engine::initWorld()
 	srtv_engine::worldgen::WorldRegion* startingRegion;
 
 	_cameraController._cameraPosition = glm::vec3{ 0.f, 257.0f, 0.f };
-	_world.generateRegion(startingRegionPos.x, startingRegionPos.y, startingRegionPos.z, _terminateWorldGenerationThread);
+	_world.generateRegion(_cameraController._cameraPosition.x, _cameraController._cameraPosition.y, _cameraController._cameraPosition.z, startingRegionPos.x, startingRegionPos.y, startingRegionPos.z, _worldGenerator, _terminateWorldGenerationThread);
 
 	startingRegion = _world.getRegion(startingRegionPos.x, startingRegionPos.y, startingRegionPos.z);
 	_worldRenderingData.loadChunks(*startingRegion, _cameraController._cameraPosition);
@@ -1038,7 +1038,7 @@ void Engine::worldGenerationThread()
 	// continuously generate regions around player position and save them in a vector
 	// this vector will be used to retrieve the generated chunks from the different regions, and then send them to the GPU if they are in viewing range
 	while (!(_terminateWorldGenerationThread.load())) {
-		_world.generateRegionsAroundPosition(_cameraController._cameraPosition.x, _cameraController._cameraPosition.y, _cameraController._cameraPosition.z, _terminateWorldGenerationThread);
+		_world.generateRegionsAroundPlayerPosition(_cameraController._cameraPosition.x, _cameraController._cameraPosition.y, _cameraController._cameraPosition.z, _worldGenerator, _terminateWorldGenerationThread);
 	}
 	ENGINE_LOG_TRACE("Terminating world generation thread...");
 }

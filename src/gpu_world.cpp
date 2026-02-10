@@ -19,6 +19,10 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
 
     // load to GPU all chunks in given generated regions that are in the player view range
     for (auto& r : regions) {
+        if (r == nullptr) {
+            continue;
+        }
+
         loadChunks(*r, playerWorldPos);
     }
 }
@@ -53,7 +57,7 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
     }
 }
 
-bool GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
+void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
 {
     // Prepare chunk content for GPU
     // at first feedback loop, all chunks are not loaded to GPU, the GPU request those needed afterward
@@ -71,16 +75,16 @@ bool GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
 
     // return if we are out of region for both corners
     if (viegGridBottomLeftCorner.x > REGION_SIZE_XZ) {
-        return false;
+        return;
     }
     else if (viewGridUpperRightCorner.x < 0) {
-        return false;
+        return;
     }
     else if (viegGridBottomLeftCorner.z > REGION_SIZE_XZ) {
-        return false;
+        return;
     }
     else if (viewGridUpperRightCorner.z < 0) {
-        return false;
+        return;
     }
 
     // limit grid coordinates to sample between [0, 0, 0] and [REGION_SIZE_XZ - 1, 0, REGION_SIZE_XZ - 1]
@@ -98,7 +102,7 @@ bool GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
             for (int yRegion = REGION_SIZE_Y-1; yRegion >= 0; yRegion--) {
 
                 // retrieve chunk data from region
-                int index = region.localPosToIndex(xRegion, yRegion, zRegion);
+                const uint32_t index = region.localPosToIndex(xRegion, yRegion, zRegion);
                 BrickChunk* chunk = region._chunks[index].get();
 
                 // check if the chunk was already loaded in the gpu at the right position, if so, no need to check for hot-reload or replace it
@@ -154,8 +158,6 @@ bool GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
             }
         }
     }
-    
-    return true;
 }
 
 } // namespace srtv_engine::worldgen

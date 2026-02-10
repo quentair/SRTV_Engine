@@ -1,9 +1,9 @@
 #pragma once
 
+#include "parameters.h"
 #include "brickmap.h"
 #include "brick_chunk.h"
 #include "world_region.h"
-#include "buffer.h"
 
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -16,8 +16,7 @@
 // max number of brickmaps to send to GPU for loading
 constexpr int BRICKMAP_QUEUE_SIZE = 1024;
 
-// radius distance for which chunk we can see around the camera
-constexpr int VIEWDISTANCE = 3;
+// area of chunks we send to GPU
 constexpr int VIEW_GRID_SIZE = (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
 
 namespace srtv_engine::worldgen {
@@ -64,7 +63,7 @@ class GpuWorld {
 
 	void saveChunks(glm::vec3 playerWorldPos);
 
-	bool loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
+	void loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
 
 	void resetChunks() {
 		for (int i = 0; i < VIEW_GRID_SIZE; i++) {
