@@ -5,6 +5,7 @@
 #include "pipeline.h"
 #include "shader.h"
 #include "push_constant.h"
+#include "parameters.h"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -686,13 +687,15 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	// bind the descriptor set containing the draw image for the compute pipeline
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
 
-	ComputeShaderCameraPushConstant pc{};
+	ComputeShaderPushConstant pc{};
 	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
 	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
+	pc._viewDistance = VIEWDISTANCE;
+	pc._lodDistance2x2x2 = LODDISTANCE_2x2x2;
 
-	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderCameraPushConstant), &pc);
+	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderPushConstant), &pc);
 
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
@@ -769,13 +772,15 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	// same for SSBOs (set at set 1)
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipelineLayout, 1, 1, &getCurrentFrame()._worldgenDescriptorSet, 0, nullptr);
 
-	ComputeShaderCameraPushConstant pc{};
+	ComputeShaderPushConstant pc{};
 	pc._cameraPosition = glm::vec4(_cameraController._cameraPosition, 1);
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
 	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
+	pc._viewDistance = VIEWDISTANCE;
+	pc._lodDistance2x2x2 = LODDISTANCE_2x2x2;
 
-	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderCameraPushConstant), &pc);
+	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderPushConstant), &pc);
 
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(commandBuffer, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
@@ -875,7 +880,7 @@ void Engine::initComputePipelines()
 	// push constants
 	VkPushConstantRange pushConstant{};
 	pushConstant.offset = 0;
-	pushConstant.size = sizeof(ComputeShaderCameraPushConstant);
+	pushConstant.size = sizeof(ComputeShaderPushConstant);
 	pushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	computePipelineLayoutCreateInfo.pPushConstantRanges = &pushConstant;

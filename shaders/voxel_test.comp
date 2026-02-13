@@ -28,12 +28,10 @@ const uint CHUNK_SIZE = 16;
 const uint CHUNK_VOXEL_RESOLUTION = CHUNK_SIZE * BRICKMAP_SIZE;
 const uint INITIAL_GPU_BRICKMAP_NUMBER = CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE;
 
-const uint REGION_SIZE_XZ = 32;
+//const uint REGION_SIZE_XZ = 32;
 const uint REGION_SIZE_Y = 4;
 
-const uint VIEW_DISTANCE = 3;
-const uint LOD_DISTANCE_2x2 = 2;
-const uint VIEW_GRID_SIZE = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
+//const uint VIEW_GRID_SIZE = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
 const uint BRICKMAP_QUEUE_SIZE = 1024;
 
 const uint BRICKMAP_LOADED_BIT = 536870912;
@@ -84,11 +82,13 @@ layout(std430, set = 1, binding = 2) buffer ChunksBuffer{
 // camera space axis push constant block //
 layout( push_constant ) uniform constants
 {
-    vec4 position;
-    vec4 front;
-    vec4 up;
-    vec4 right;
-} CameraPushConstant;
+    vec4 cameraPosition;
+    vec4 cameraFront;
+    vec4 cameraUp;
+    vec4 cameraRight;
+    uint viewDistance;
+    uint lodDistance2x2x2;
+} PushConstant;
 
 ////////////// INTERSECTIONS TESTS //////////////
 
@@ -585,12 +585,12 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         float subDistance = 0.f;
 
         // radius distance at which we will display LODs
-        uint LodDistance2x2Squared = LOD_DISTANCE_2x2 *  CHUNK_VOXEL_RESOLUTION * LOD_DISTANCE_2x2 *  CHUNK_VOXEL_RESOLUTION;
+        uint LodDistance2x2x2Squared = PushConstant.lodDistance2x2x2 *  CHUNK_VOXEL_RESOLUTION * PushConstant.lodDistance2x2x2 *  CHUNK_VOXEL_RESOLUTION;
 
-        vec3 difference = (rayOrigin + updateTraveledDistance * rayDirection) - CameraPushConstant.position.xyz;
+        vec3 difference = (rayOrigin + updateTraveledDistance * rayDirection) - PushConstant.cameraPosition.xyz;
         float traveledDistanceSquared = dot(difference, difference);
 
-        if(traveledDistanceSquared > LodDistance2x2Squared) {
+        if(traveledDistanceSquared > LodDistance2x2x2Squared) {
             // world position at which we intersect our chunk
             float epsilon = 0.005f;
 
@@ -690,11 +690,13 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
     // at each index value, we enter a new chunk from a different side
     // example (x = 2; z = 1) is one cell in our grid, and at (x = 3; z = 1) we have another cell, and we enter it from the left side (x+1). If we nether stepped in the y axis, the chunk in the column is the one at the ray origin height
 
+    uint viewDistance = PushConstant.viewDistance;
+
     // convert origin position from world space to viewgrid local space
     // note : camera is always at the center cell of the viewgrid
-    ivec2 viewGridCenter = ivec2(VIEW_DISTANCE, VIEW_DISTANCE);
+    ivec2 viewGridCenter = ivec2(viewDistance, viewDistance);
 
-    vec3 cameraPosition = CameraPushConstant.position.xyz;
+    vec3 cameraPosition = PushConstant.cameraPosition.xyz;
 
     vec3 rayDisplacement = rayOrigin - cameraPosition;
 
@@ -714,7 +716,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         outX = -1.0;
     } 
     else {
-        outX = VIEW_DISTANCE * 2 + 1;
+        outX = viewDistance * 2 + 1;
     }
     if(rayDirection.y < 0.0) {
         outY = -1.0;
@@ -726,7 +728,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         outZ = -1.0;
     } 
     else {
-        outZ = VIEW_DISTANCE * 2 + 1;
+        outZ = viewDistance * 2 + 1;
     }
     ivec3 outPos  = ivec3(outX, outY, outZ);
 
@@ -804,7 +806,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
     while(true) {
 
         // retrieve index of our column of chunks
-        uint chunkColumnIndex = mapPos.x + mapPos.z * (VIEW_DISTANCE * 2 + 1);
+        uint chunkColumnIndex = mapPos.x + mapPos.z * (viewDistance * 2 + 1);
 
         // calculate the distance of the ray to the intersected chunk
         // going one step back, because in the DDA steps above we went one step further to end up inside a chunk
@@ -888,10 +890,10 @@ void main()
     float uv_y = ( 2.0 * texelCoord.y - size.y ) / size.x;
 
     // camera setup
-    vec3 cameraPosition = CameraPushConstant.position.xyz;
-    vec3 cameraForward = CameraPushConstant.front.xyz;
-    vec3 cameraUp = CameraPushConstant.up.xyz;
-    vec3 cameraRight = CameraPushConstant.right.xyz;
+    vec3 cameraPosition = PushConstant.cameraPosition.xyz;
+    vec3 cameraForward = PushConstant.cameraFront.xyz;
+    vec3 cameraUp = PushConstant.cameraUp.xyz;
+    vec3 cameraRight = PushConstant.cameraRight.xyz;
 
     // ray setup
     Ray ray;
