@@ -49,8 +49,8 @@ void World::generateRegion(float xPlayer, float yPlayer, float zPlayer, int xReg
         }
         
         //_regionsHashmap[glm::ivec3(x, y, z)]->generate(stopGeneration);
-        worldGenerator.generateRegion(*region, glm::vec3(xPlayer, yPlayer, zPlayer), stopGeneration);
     }
+    worldGenerator.generateRegion(*region, glm::vec3(xPlayer, yPlayer, zPlayer), stopGeneration);
 }
 
 void World::clearRegionsFarFromPositon(float x, float y, float z)

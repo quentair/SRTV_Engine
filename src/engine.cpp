@@ -17,6 +17,7 @@
 
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 namespace srtv_engine {
 
@@ -211,8 +212,27 @@ void Engine::run()
 		ImGui_ImplSDL3_NewFrame();
 		ImGui::NewFrame();
 
-		//some imgui UI to test
-		ImGui::ShowDemoWindow();
+		// IMGUI window
+		//ImGui::ShowDemoWindow();
+
+		ImGui::Text("Simple ray traced voxel engine");
+		ImGui::Spacing();
+
+		ImGui::SeparatorText("Player datas");
+		ImGui::Text("Player position : x = %0.2f ; y = %0.2f ; z = %0.2f", _cameraController._cameraPosition.x, _cameraController._cameraPosition.y, _cameraController._cameraPosition.z);
+
+		ImGui::SeparatorText("Graphics parameters");
+
+		int newViewDistance = _worldRenderingData._viewDistance;
+		int newLodDistance2x2x2 = _lodDistance2x2x2;
+		if (ImGui::InputInt("View distance", &newViewDistance, 1, 1)) {
+			newViewDistance = std::clamp(newViewDistance, 1, MAX_VIEW_DISTANCE);
+			changeViewDistance(newViewDistance);
+		}
+		if (ImGui::InputInt("LOD 2x2x2 distance", &newLodDistance2x2x2, 1, 1)) {
+			newLodDistance2x2x2 = std::clamp(newLodDistance2x2x2, 0, newViewDistance);
+			changeLodDistance2x2x2(newLodDistance2x2x2);
+		}
 
 		//make imgui calculate internal draw structures
 		ImGui::Render();
@@ -349,6 +369,17 @@ void Engine::initImgui()
 
 	// register ImGUI descrptor pool for further deletion
 	_mainResourceDeletor.registerDescriptorPool(imguiPool);
+}
+
+void Engine::changeViewDistance(int& newViewDistance)
+{
+	_worldRenderingData.changeViewDistance(newViewDistance);
+	_worldGenerator.changeViewDistance(newViewDistance);
+}
+
+void Engine::changeLodDistance2x2x2(int& newLodDistance2x2x2)
+{
+	_lodDistance2x2x2 = newLodDistance2x2x2;
 }
 
 void Engine::initSwapchain()
@@ -692,8 +723,8 @@ void Engine::drawBackground(VkCommandBuffer commandBuffer)
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
 	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
-	pc._viewDistance = VIEWDISTANCE;
-	pc._lodDistance2x2x2 = LODDISTANCE_2x2x2;
+	pc._viewDistance = MAX_VIEW_DISTANCE;
+	pc._lodDistance2x2x2 = _lodDistance2x2x2;
 
 	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderPushConstant), &pc);
 
@@ -777,8 +808,8 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
 	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
-	pc._viewDistance = VIEWDISTANCE;
-	pc._lodDistance2x2x2 = LODDISTANCE_2x2x2;
+	pc._viewDistance = MAX_VIEW_DISTANCE;
+	pc._lodDistance2x2x2 = _lodDistance2x2x2;
 
 	vkCmdPushConstants(commandBuffer, _computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputeShaderPushConstant), &pc);
 
@@ -843,8 +874,8 @@ void Engine::initDescriptors()
 	for (auto& frame : _frames) {
 		DescriptorWriter ssboWriter;
 		ssboWriter.writeBuffer(0, frame._worldDataBuffer._buffer, sizeof(worldgen::WorldGpuData), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-		ssboWriter.writeBuffer(1, frame._viewDistanceGridBuffer._buffer, sizeof(uint32_t) * VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-		ssboWriter.writeBuffer(2, frame._chunksDataBuffer._buffer, sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(1, frame._viewDistanceGridBuffer._buffer, sizeof(uint32_t) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(2, frame._chunksDataBuffer._buffer, sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.updateSet(_device, frame._worldgenDescriptorSet);
 	}
 
@@ -931,9 +962,9 @@ void Engine::initBuffers()
 	for (auto& frame : _frames) {
 		VkBufferCreateInfo worldBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::WorldGpuData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-		VkBufferCreateInfo viewDistanceGridBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(uint32_t) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		VkBufferCreateInfo viewDistanceGridBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(uint32_t) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 		// buffers for data written by or transferred from the GPU that we want to read back on the CPU
 		VmaAllocationCreateInfo vmaallocInfo = {};
@@ -986,7 +1017,7 @@ void Engine::readbackBuffers(int frameNumber)
 		int brickIndex = intersectionData & BRICKMAP_INDEX_BITS;
 
 		// retieve chunk from cache, giving access to its bricks datas
-		int loadedChunkIndex = brickPositions.x + brickPositions.y * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+		int loadedChunkIndex = brickPositions.x + brickPositions.y * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
 		worldgen::BrickChunk* chunk = _worldRenderingData._gpuLoadedChunks[loadedChunkIndex];
 
 		// stage loaded brick in CPU side, it will be upload in the SSBO on next frame (in drawWorld function)

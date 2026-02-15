@@ -71,6 +71,10 @@ public:
 	// IMGUI
 	void initImgui();
 
+	// IMGUI callbacks
+	void changeViewDistance(int& newViewDistance);
+	void changeLodDistance2x2x2(int& newLodDistance2x2x2);
+
 	// swapchain
 	Swapchain _swapchain;
 	void initSwapchain();
@@ -141,6 +145,7 @@ public:
 
 	// world data for rendering
 	worldgen::GpuWorld _worldRenderingData{};
+	uint32_t _lodDistance2x2x2 = BASE_LOD_DISTANCE_2x2x2;
 
 	// world generation
 	worldgen::WorldGenerator _worldGenerator{};

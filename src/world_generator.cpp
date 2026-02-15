@@ -26,8 +26,8 @@ void WorldGenerator::generateRegion(WorldRegion& region, glm::vec3 playerWorldPo
     glm::ivec3 regionPosition = region._worldPos;
 
     // compute view distance area corners in world coordinates, in relation to the region world position
-    glm::vec3 viegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - GENERATE_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - GENERATE_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
-    glm::vec3 viewGridUpperRightCornerCoordinates = glm::vec3(floor(playerWorldPos.x) + GENERATE_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) + GENERATE_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
+    glm::vec3 viegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - _generatingDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - _generatingDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
+    glm::vec3 viewGridUpperRightCornerCoordinates = glm::vec3(floor(playerWorldPos.x) + _generatingDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) + _generatingDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
 
     // convert corner positions to chunks grid coordinates (y axis is defaulted because viewdistance is a 2D grid on XZ plane)
     glm::ivec3 viegGridBottomLeftCorner = region.relativeWorldPosToChunkGridPosition(viegGridBottomLeftCornerCoordinates.x, 0, viegGridBottomLeftCornerCoordinates.z);

@@ -38,11 +38,11 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
             continue;
 
         // retrieve already loaded chunk data
-        int xGrid = i % (VIEWDISTANCE * 2 + 1);
-        int zGrid = i / (VIEWDISTANCE * 2 + 1) % (VIEWDISTANCE * 2 + 1);
-        int yGrid = i / (VIEWDISTANCE * 2 + 1) / (VIEWDISTANCE * 2 + 1);
+        int xGrid = i % (MAX_VIEW_DISTANCE * 2 + 1);
+        int zGrid = i / (MAX_VIEW_DISTANCE * 2 + 1) % (MAX_VIEW_DISTANCE * 2 + 1);
+        int yGrid = i / (MAX_VIEW_DISTANCE * 2 + 1) / (MAX_VIEW_DISTANCE * 2 + 1);
         
-        int viewGridIndex = xGrid + zGrid * (VIEWDISTANCE * 2 + 1);
+        int viewGridIndex = xGrid + zGrid * (MAX_VIEW_DISTANCE * 2 + 1);
         int yRegion = yGrid;
 
         ChunkGpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
@@ -50,7 +50,7 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
         // because the player changed from chunk on this frame and the loaded chunks are not yet up to date, the central chunk of the loaded chunks is the chunk where the player was situated on the precedent frame
         glm::ivec3 centalChunkWorldPos = _playerLastChunk;
 
-        glm::ivec3 gpuLoadedChunkWorldPos = glm::ivec3(centalChunkWorldPos.x + (xGrid - VIEWDISTANCE) * CHUNK_VOXEL_RESOLUTION, yGrid * CHUNK_VOXEL_RESOLUTION, centalChunkWorldPos.z + (zGrid - VIEWDISTANCE) * CHUNK_VOXEL_RESOLUTION);
+        glm::ivec3 gpuLoadedChunkWorldPos = glm::ivec3(centalChunkWorldPos.x + (xGrid - MAX_VIEW_DISTANCE) * CHUNK_VOXEL_RESOLUTION, yGrid * CHUNK_VOXEL_RESOLUTION, centalChunkWorldPos.z + (zGrid - MAX_VIEW_DISTANCE) * CHUNK_VOXEL_RESOLUTION);
         
         // save loaded chunk data
         _tempChunks[gpuLoadedChunkWorldPos] = *chunkData;
@@ -65,13 +65,17 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
 
     glm::ivec3 regionPosition = region._worldPos;
 
-    // compute view distance area corners in world coordinates, in relation to the region world position
-    glm::vec3 viegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - VIEWDISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - VIEWDISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
-    glm::vec3 viewGridUpperRightCornerCoordinates = glm::vec3(floor(playerWorldPos.x) + VIEWDISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) + VIEWDISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
+    // compute view distance area corners in world coordinates, in relation to the region world position (remember that this is a subset of our maximum viewing range)
+    glm::vec3 viegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - _viewDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - _viewDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
+    glm::vec3 viewGridUpperRightCornerCoordinates = glm::vec3(floor(playerWorldPos.x) + _viewDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) + _viewDistance * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
 
     // convert corner positions to chunks grid coordinates (y axis is defaulted because viewdistance is a 2D grid on XZ plane)
     glm::ivec3 viegGridBottomLeftCorner = region.relativeWorldPosToChunkGridPosition(viegGridBottomLeftCornerCoordinates.x, 0, viegGridBottomLeftCornerCoordinates.z);
     glm::ivec3 viewGridUpperRightCorner = region.relativeWorldPosToChunkGridPosition(viewGridUpperRightCornerCoordinates.x, 0, viewGridUpperRightCornerCoordinates.z);
+
+    // same for maximum viewing range to sample loaded chunks on the right indices
+    glm::vec3 maxViegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
+    glm::ivec3 maxViegGridBottomLeftCorner = region.relativeWorldPosToChunkGridPosition(maxViegGridBottomLeftCornerCoordinates.x, 0, maxViegGridBottomLeftCornerCoordinates.z);
 
     // return if we are out of region for both corners
     if (viegGridBottomLeftCorner.x > REGION_SIZE_XZ) {
@@ -96,8 +100,8 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
         for (int zRegion = chunkGridBottomLeftCorner.z; zRegion <= chungGirdUpperRightCorner.z; zRegion++) {
 
             // convert chunk grid position to view grid position
-            glm::ivec2 viewGridPos = glm::ivec2(chunkGridBottomLeftCorner.x - viegGridBottomLeftCorner.x + xRegion - chunkGridBottomLeftCorner.x, chunkGridBottomLeftCorner.z - viegGridBottomLeftCorner.z + zRegion - chunkGridBottomLeftCorner.z);
-            int viewGridIndex = viewGridPos.x + viewGridPos.y * (VIEWDISTANCE * 2 + 1);
+            glm::ivec2 viewGridPos = glm::ivec2(chunkGridBottomLeftCorner.x - maxViegGridBottomLeftCorner.x + xRegion - chunkGridBottomLeftCorner.x, chunkGridBottomLeftCorner.z - maxViegGridBottomLeftCorner.z + zRegion - chunkGridBottomLeftCorner.z);
+            int viewGridIndex = viewGridPos.x + viewGridPos.y * (MAX_VIEW_DISTANCE * 2 + 1);
 
             for (int yRegion = REGION_SIZE_Y-1; yRegion >= 0; yRegion--) {
 
@@ -106,7 +110,7 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                 BrickChunk* chunk = region._chunks[index].get();
 
                 // check if the chunk was already loaded in the gpu at the right position, if so, no need to check for hot-reload or replace it
-                int loadedMapIndex = viewGridIndex + yRegion * (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+                int loadedMapIndex = viewGridIndex + yRegion * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
                 if (_gpuLoadedChunks[loadedMapIndex] == chunk && chunk != nullptr) {
                     _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
                     continue;

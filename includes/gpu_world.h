@@ -14,10 +14,10 @@
 #include <unordered_map>
 
 // max number of brickmaps to send to GPU for loading
-constexpr int BRICKMAP_QUEUE_SIZE = 1024;
+constexpr uint32_t BRICKMAP_QUEUE_SIZE = 1024;
 
 // area of chunks we send to GPU
-constexpr int VIEW_GRID_SIZE = (VIEWDISTANCE * 2 + 1) * (VIEWDISTANCE * 2 + 1);
+constexpr uint32_t MAX_VIEW_GRID_SIZE = (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
 
 namespace srtv_engine::worldgen {
 
@@ -47,17 +47,19 @@ class GpuWorld {
 	WorldGpuData _worldData;
 
 	// Buffer2 : presence grid for the chunks data
-	std::vector<uint32_t> _viewDistanceGrid = std::vector<uint32_t>(VIEW_GRID_SIZE); // array of chunk presence, parse and retrieve data at same incides from chunk buffer
+	std::vector<uint32_t> _viewDistanceGrid = std::vector<uint32_t>(MAX_VIEW_GRID_SIZE); // array of chunk presence, parse and retrieve data at same incides from chunk buffer
 
 	// Buffer3 : data of chunks organised into columns of chunks
-	std::vector<ChunksColumnGpuData> _chunksDataColumns = std::vector<ChunksColumnGpuData>(VIEW_GRID_SIZE);
+	std::vector<ChunksColumnGpuData> _chunksDataColumns = std::vector<ChunksColumnGpuData>(MAX_VIEW_GRID_SIZE);
 
 	//  quick access to chunks whose datas are cached for the GPU
-	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(VIEW_GRID_SIZE * REGION_SIZE_Y);
+	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(MAX_VIEW_GRID_SIZE * REGION_SIZE_Y);
 	std::unordered_map<glm::ivec3, ChunkGpuData> _tempChunks; // temporary chunk data hashmap to displace them instead of reloading them if they are still in the grid but moved from cell
 
 	// world position of the chunk where the player was last situated
 	glm::ivec3 _playerLastChunk{ 0, -1, 0 };
+
+	uint32_t _viewDistance = BASE_VIEW_DISTANCE;
 
 	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
 
@@ -65,8 +67,12 @@ class GpuWorld {
 
 	void loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
 
+	void changeViewDistance(int& newViewDistance) {
+		_viewDistance = newViewDistance;
+	}
+
 	void resetChunks() {
-		for (int i = 0; i < VIEW_GRID_SIZE; i++) {
+		for (int i = 0; i < MAX_VIEW_GRID_SIZE; i++) {
 			_viewDistanceGrid[i] = 0;
 		}
 	}
