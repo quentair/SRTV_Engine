@@ -8,13 +8,19 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
 {
     glm::ivec3 centalChunkWorldPos = glm::ivec3(floor(playerWorldPos.x / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.y / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.z / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION);
 
-    bool playerChangedChunk = centalChunkWorldPos != _playerLastChunk;
+    _playerChangedChunk = centalChunkWorldPos != _playerLastChunk;
+
+    if (_playerChangedChunk) {
+
+        for (int i = 0; i < _brickmapsData.size(); i++) {
+            // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
+            _brickmapsData[i]._used = false;
+        }
 
     // save the chunks datas that we send to GPU in case the player moved from one chunk to another (so we don't erase datas when we load back new and old chunks to the GPU)
-    if (playerChangedChunk) {
-        _tempChunks.clear();
         saveChunks(playerWorldPos);
         _playerLastChunk = centalChunkWorldPos;
+        _viewgridAnchorWorldPos = glm::vec2(float(centalChunkWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION, float(centalChunkWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION);
     }
 
     // load to GPU all chunks in given generated regions that are in the player view range
@@ -22,7 +28,6 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
         if (r == nullptr) {
             continue;
         }
-
         loadChunks(*r, playerWorldPos);
     }
 }
@@ -45,7 +50,7 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
         int viewGridIndex = xGrid + zGrid * (MAX_VIEW_DISTANCE * 2 + 1);
         int yRegion = yGrid;
 
-        ChunkGpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
+        ChunkCpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
 
         // because the player changed from chunk on this frame and the loaded chunks are not yet up to date, the central chunk of the loaded chunks is the chunk where the player was situated on the precedent frame
         glm::ivec3 centalChunkWorldPos = _playerLastChunk;
@@ -54,6 +59,9 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
         
         // save loaded chunk data
         _tempChunks[gpuLoadedChunkWorldPos] = *chunkData;
+
+        // clear the pointer to the chunk to avoid using outdated datas (pointer will be updated later if needed)
+        _gpuLoadedChunks[i] = nullptr;
     }
 }
 
@@ -115,21 +123,28 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                     _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
                     continue;
                 }
-
-                // get chunk data in the chunk column given its y position
-                ChunkGpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
-                
-                // clear GPU chunk datas so we don't accidentaly read datas from a chunk that is no longer at this position
-                chunkData->_brickmaps = std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE>{};
-                chunkData->_brickmapsData = std::array<Brickmap, INITIAL_GPU_BRICKMAPS_NUMBER>{};
-                
-                if (chunk == nullptr || chunk->isGenerated() == false) {
+                else if (_gpuLoadedChunks[loadedMapIndex] == chunk && chunk == nullptr) {
+                    // if chunk was empty and stays empty, skip it too
                     _viewDistanceGrid[viewGridIndex] |= 0; // indicates that this chunk column might not be generated yet (if at least on chunk of the column is present, it is marked as generated, otherwise, it is not marked)
-                    _gpuLoadedChunks[loadedMapIndex] = nullptr; // update array of pointer to chunks that we send to GPU to avoid unupdated data retrieval later
                     continue;
                 }
 
-                // save chunk pointer
+                // get chunk data in the chunk column given its y position
+                ChunkCpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
+                
+                // clear GPU chunk datas so we don't accidentaly read datas from a chunk that is no longer at this position
+                chunkData->_brickmaps = std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE>{};
+                //chunkData->_dataIndex = -1;
+                
+                if (chunk == nullptr || chunk->isGenerated() == false) {
+                    _viewDistanceGrid[viewGridIndex] |= 0; // indicates that this chunk column might not be generated yet (if at least on chunk of the column is present, it is marked as generated, otherwise, it is not marked)
+                    _gpuLoadedChunks[loadedMapIndex] = nullptr; // update array of pointer to chunks that are sent to GPU to avoid unupdated data retrieval later
+                    // chunk data was erased, so mark the chunk as dirty
+                    markChunkAsDirty(loadedMapIndex);
+                    continue;
+                }
+
+                // save chunk pointer for quick access
                 _gpuLoadedChunks[loadedMapIndex] = chunk;
 
                 // if the chunk was an already loaded chunk but changed from position (cell), just copy back the content we saved earlier in the hashmap
@@ -137,19 +152,20 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                 if (auto search = _tempChunks.find(gpuLoadedChunkWorldPosition); search != _tempChunks.end())
                 {
                     _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
-                    chunkData->_brickmapsData = search->second._brickmapsData;
-                    chunkData->_brickmaps = search->second._brickmaps;
+                    *chunkData = search->second;
+                    if (chunkData->_dataIndex >= 0) {
+                        _brickmapsData[chunkData->_dataIndex]._used = true; // mark the chunk data as used so the array cell is reserved and not replaced later
+                    }
                     continue;
                 }
 
                 for (int i = 0; i < chunk->_indices.size(); i++) {
                     // if brickmap inside the chunk has been generated, just load the LOD and mark it as unloaded for the GPU
-                    int brickIndex = chunk->_indices[i] & BRICKMAP_INDEX_BITS;
                     if (chunk->_indices[i] & BRICKMAP_LOADED_BIT) {
+                        // chunk data is updated, so mark the chunk as dirty
+                        markChunkAsDirty(loadedMapIndex);
                         chunkData->_brickmaps[i] = BRICKMAP_UNLOADED_BIT | (chunk->_indices[i] & BRICKMAP_LOD_BITS) | (chunk->_indices[i] & BRICKMAP_INDEX_BITS);
                         _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
-                        //chunkData->_brickmaps[i] = BRICKMAP_LOADED_BIT | chunk->_indices[i];
-                        //chunkData->_brickmapsData[i] = chunk->_brickmaps[brickIndex];
                     }
                     else {
                         _viewDistanceGrid[viewGridIndex] |= 0; // indicates that this chunk column might not be generated yet (if at least on chunk of the column is present, it is marked as generated, otherwise, it is not marked)

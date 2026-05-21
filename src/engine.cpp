@@ -143,12 +143,17 @@ void Engine::initVulkan()
 
 	ENGINE_LOG_TRACE("Getting Vulkan Queue...");
 
-	auto queueReturn = vkbDevice.get_queue(vkb::QueueType::graphics);
+	auto graphicsQueueReturn = vkbDevice.get_queue(vkb::QueueType::graphics);
+	auto transferQueueReturn = vkbDevice.get_queue(vkb::QueueType::transfer);
 
-	CHECK_VKB_FATAL_ERROR(queueReturn);
+	CHECK_VKB_FATAL_ERROR(graphicsQueueReturn);
+	CHECK_VKB_FATAL_ERROR(transferQueueReturn);
 
-	_graphicsQueue = queueReturn.value();
+	_graphicsQueue = graphicsQueueReturn.value();
 	_graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+	_transferQueue = transferQueueReturn.value();
+	_transferQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::transfer).value();
 
 	ENGINE_LOG_TRACE("Vulkan Queue acquisition went fine");
 }
@@ -234,6 +239,9 @@ void Engine::run()
 			changeLodDistance2x2x2(newLodDistance2x2x2);
 		}
 
+		ImGui::Text("Max number of voxel we can render : %0.lf", std::pow(CHUNK_VOXEL_RESOLUTION, 3) * MAX_VIEW_GRID_SIZE * REGION_SIZE_Y);
+
+
 		//make imgui calculate internal draw structures
 		ImGui::Render();
 
@@ -276,6 +284,7 @@ void Engine::cleanup()
 		}
 
 		// flush and destroy the global resources
+		vkDestroyCommandPool(_device, _transferCommandPool, nullptr);
 		_mainResourceDeletor.flush(_allocator, _device);
 
 		destroySwapchain();
@@ -437,23 +446,37 @@ void Engine::initCommands()
 
 	ENGINE_LOG_TRACE("Building Vulkan Command Pool...");
 
-	VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-	commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	commandPoolCreateInfo.pNext = nullptr;
-	commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	commandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
-
-	ENGINE_LOG_TRACE("Vulkan Command Pool creation went fine");
-
-	ENGINE_LOG_TRACE("Building Vulkan Commands (double buffering)...");
+	VkCommandPoolCreateInfo graphicsCommandPoolCreateInfo = {};
+	graphicsCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	graphicsCommandPoolCreateInfo.pNext = nullptr;
+	graphicsCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	graphicsCommandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
 
 	for (auto& frame : _frames) {
 		CHECK_VK_FATAL_ERROR(vkCreateCommandPool(
 			_device,
-			&commandPoolCreateInfo,
+			&graphicsCommandPoolCreateInfo,
 			nullptr,
 			&frame._commandPool));
+	}
 
+	VkCommandPoolCreateInfo transferCommandPoolCreateInfo = {};
+	transferCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	transferCommandPoolCreateInfo.pNext = nullptr;
+	transferCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	transferCommandPoolCreateInfo.queueFamilyIndex = _transferQueueFamily;
+
+	CHECK_VK_FATAL_ERROR(vkCreateCommandPool(
+		_device,
+		&transferCommandPoolCreateInfo,
+		nullptr,
+		&_transferCommandPool));
+
+	ENGINE_LOG_TRACE("Vulkan Command Pool creation went fine");
+
+	ENGINE_LOG_TRACE("Building Vulkan Commands (frame with double buffering, transfer)...");
+
+	for (auto& frame : _frames) {
 		// allocate the defaults command buffers that we will use for rendering
 
 		VkCommandBufferAllocateInfo cmdAllocInfo = {};
@@ -468,6 +491,18 @@ void Engine::initCommands()
 			&cmdAllocInfo,
 			&frame._commandBuffer));
 	}
+
+	VkCommandBufferAllocateInfo cmdAllocInfo = {};
+	cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cmdAllocInfo.pNext = nullptr;
+	cmdAllocInfo.commandPool = _transferCommandPool;
+	cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cmdAllocInfo.commandBufferCount = 1;
+
+	CHECK_VK_FATAL_ERROR(vkAllocateCommandBuffers(
+		_device,
+		&cmdAllocInfo,
+		&_transferCommandBuffer));
 
 	ENGINE_LOG_TRACE("Vulkan Commands creation went fine");
 }
@@ -568,7 +603,11 @@ void Engine::draw()
 	// readback of SSBO of precedent asscociated frame to prepare the next frame datas
 	readbackBuffers(_frameNumber);
 
+	// destroy frame-bound data
 	getCurrentFrame()._frameResourceDeletor.flush(_allocator, _device);
+
+	// copye CPU datas to GPU buffers
+	copyBuffers(_frameNumber);
 
 	// acquire next image (by index) from the swapchain (1 second timeout)
 	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations
@@ -766,34 +805,7 @@ void Engine::drawImgui(VkCommandBuffer commandBuffer, VkImageView targetImageVie
 }
 
 void Engine::drawWorld(VkCommandBuffer commandBuffer)
-{
-	// update chunks to render
-	
-	_worldRenderingData.resetChunks();
-
-	// lock generated region vector access and read it, we will write on it on the world generator thread after the read operation
-	{
-		const std::lock_guard<std::mutex> lock(_world._registeredRegionsMutex);
-		_worldRenderingData.loadRegions(_world._registeredRegions, _cameraController._cameraPosition);
-	}
-
-	// write into each world generation SSBO
-	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getCurrentFrame()._worldDataBufferAllocInfo.pMappedData;
-	uint32_t* viewDistanceGridSSBO = (uint32_t*)getCurrentFrame()._viewDistanceGridAllocInfo.pMappedData;
-	worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)getCurrentFrame()._chunksDataBufferAllocInfo.pMappedData;
-
-	*worldDataSSBO = _worldRenderingData._worldData;
-
-	for (int i = 0; i < _worldRenderingData._viewDistanceGrid.size(); i++)
-	{
-		viewDistanceGridSSBO[i] = _worldRenderingData._viewDistanceGrid[i];
-	}
-
-	for (int i = 0; i < _worldRenderingData._chunksDataColumns.size(); i++)
-	{
-		chunksColumnDataSSBO[i] = _worldRenderingData._chunksDataColumns[i];
-	}
-	
+{	
 	// bind the gradient drawing compute pipeline
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
 
@@ -808,6 +820,7 @@ void Engine::drawWorld(VkCommandBuffer commandBuffer)
 	pc._cameraFront = glm::vec4(_cameraController._cameraFront, 0);
 	pc._cameraUp = glm::vec4(_cameraController._cameraUp, 0);
 	pc._cameraRight = glm::vec4(_cameraController._cameraRight, 0);
+	pc._viewgridAnchorWorldPos = glm::vec4(_gpuViewgridAnchorWorldPos, 0, 0);
 	pc._viewDistance = MAX_VIEW_DISTANCE;
 	pc._lodDistance2x2x2 = _lodDistance2x2x2;
 
@@ -851,6 +864,7 @@ void Engine::initDescriptors()
 		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 0 in the shader, we must have a storage buffer
 		builder.addBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 1 in the shader, we must have a storage buffer
 		builder.addBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 2 in the shader, we must have a storage buffer
+		builder.addBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // at set 1 binding 2 in the shader, we must have a storage buffer
 		_worldgenDescriptorSetLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT); // the layout is made for compute shader stage
 	}
 
@@ -876,6 +890,7 @@ void Engine::initDescriptors()
 		ssboWriter.writeBuffer(0, frame._worldDataBuffer._buffer, sizeof(worldgen::WorldGpuData), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.writeBuffer(1, frame._viewDistanceGridBuffer._buffer, sizeof(uint32_t) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.writeBuffer(2, frame._chunksDataBuffer._buffer, sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(3, frame._brickmapsDataBuffer._buffer, sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * REGION_SIZE_Y, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.updateSet(_device, frame._worldgenDescriptorSet);
 	}
 
@@ -964,47 +979,154 @@ void Engine::initBuffers()
 
 		VkBufferCreateInfo viewDistanceGridBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(uint32_t) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		VkBufferCreateInfo brickmapsDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * REGION_SIZE_Y, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 		// buffers for data written by or transferred from the GPU that we want to read back on the CPU
-		VmaAllocationCreateInfo vmaallocInfo = {};
-		vmaallocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-		vmaallocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+		VmaAllocationCreateInfo vmaReadbackAllocInfo = {};
+		vmaReadbackAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		vmaReadbackAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		// buffers for data existing on GPU and updated via staging buffer data transfer
+		VmaAllocationCreateInfo vmaDeviceLocalAllocInfo = {};
+		vmaDeviceLocalAllocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+		vmaDeviceLocalAllocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
 
 		// allocate buffers with VMA
-		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &worldBufferCreateInfo, &vmaallocInfo,
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &worldBufferCreateInfo, &vmaReadbackAllocInfo,
 			&frame._worldDataBuffer._buffer,
 			&frame._worldDataBuffer._allocation,
 			&frame._worldDataBufferAllocInfo));
 
-		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &viewDistanceGridBufferCreateInfo, &vmaallocInfo,
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &viewDistanceGridBufferCreateInfo, &vmaReadbackAllocInfo,
 			&frame._viewDistanceGridBuffer._buffer,
 			&frame._viewDistanceGridBuffer._allocation,
 			& frame._viewDistanceGridAllocInfo));
 
-		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksDataBufferCreateInfo, &vmaallocInfo,
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksDataBufferCreateInfo, &vmaReadbackAllocInfo,
 			&frame._chunksDataBuffer._buffer,
 			&frame._chunksDataBuffer._allocation,
 			&frame._chunksDataBufferAllocInfo));
 
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &brickmapsDataBufferCreateInfo, &vmaReadbackAllocInfo,
+			&frame._brickmapsDataBuffer._buffer,
+			&frame._brickmapsDataBuffer._allocation,
+			&frame._brickmapsDataBufferAllocInfo));
+
+		// staging buffer : CPU accessible memory to upload the data to
+
+		/*VkBufferCreateInfo chunksStagingBufferCreateInfo = buffer::stagingBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE);
+
+		VmaAllocationCreateInfo stagingBufferAllocInfo = {};
+		stagingBufferAllocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+		stagingBufferAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		// allocate buffer with VMA
+		CHECK_VK_FATAL_ERROR(vmaCreateBuffer(_allocator, &chunksStagingBufferCreateInfo, &stagingBufferAllocInfo,
+			&frame._chunksStagingBuffer._buffer,
+			&frame._chunksStagingBuffer._allocation,
+			&frame._chunksStagingBufferAllocInfo));
+		*/
+
+
 		// register buffers for furhter deletion
+
 		_mainResourceDeletor.registerBuffer(&frame._worldDataBuffer);
 		_mainResourceDeletor.registerBuffer(&frame._viewDistanceGridBuffer);
 		_mainResourceDeletor.registerBuffer(&frame._chunksDataBuffer);
+		_mainResourceDeletor.registerBuffer(&frame._brickmapsDataBuffer);
+		//_mainResourceDeletor.registerBuffer(&frame._chunksStagingBuffer);
 	}
 
 	ENGINE_LOG_TRACE("Creation of Vulkan Buffers went fine");
+}
+
+void Engine::copyBuffers(int frameNumber) 
+{
+	// update chunks to render
+
+	_worldRenderingData.resetViewGrid();
+
+	// lock generated region vector access and read it, we will write on it on the world generator thread after the read operation
+	{
+		const std::lock_guard<std::mutex> lock(_world._registeredRegionsMutex);
+		_worldRenderingData.loadRegions(_world._registeredRegions, _cameraController._cameraPosition);
+	}
+
+	// write into each world generation SSBO
+	//worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getCurrentFrame()._worldDataBufferAllocInfo.pMappedData;
+	uint32_t* viewDistanceGridSSBO = (uint32_t*)getCurrentFrame()._viewDistanceGridAllocInfo.pMappedData;
+	worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)getCurrentFrame()._chunksDataBufferAllocInfo.pMappedData;
+	//worldgen::BrickmapsGpuData* brickmapsDataSSBO = (worldgen::BrickmapsGpuData*)getCurrentFrame()._brickmapsDataBufferAllocInfo.pMappedData;
+	//worldgen::ChunksColumnGpuData* chunksColumnDataSSBO = (worldgen::ChunksColumnGpuData*)getCurrentFrame()._chunksStagingBufferAllocInfo.pMappedData;
+
+	//*worldDataSSBO = _worldRenderingData._worldData;
+
+	for (int i = 0; i < _worldRenderingData._viewDistanceGrid.size(); i++)
+	{
+		viewDistanceGridSSBO[i] = _worldRenderingData._viewDistanceGrid[i];
+	}
+
+	if (_worldRenderingData._playerChangedChunk) {
+		// if the player changed from chunks, all the actual chunks needs to be displaced (so updated GPU side)
+		markFramesChunksAsDirty();
+	}
+
+	// in case the whole view area needs to be updated
+	if (_dirtyFrameChunks[_frameNumber] == 1) {
+		// whole rendered chunks update (e.g. : player changed from chunk, ...)
+		for (int i = 0; i < _worldRenderingData._chunksDataColumns.size(); i++)
+		{
+			memcpy(&(chunksColumnDataSSBO[i]), &(_worldRenderingData._chunksDataColumns[i]), sizeof(chunksColumnDataSSBO[i]));
+
+			for (int j = REGION_SIZE_Y - 1; j >= 0; j--)
+			{
+				int chunkNumber = i + j * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
+				_worldRenderingData.markChunkAsUpdated(_frameNumber, chunkNumber);
+			}
+		}
+
+		// update anchor position on the GPU if we updated our chunks and the trasnfer to the GPU is fully done
+		_gpuViewgridAnchorWorldPos = _worldRenderingData._viewgridAnchorWorldPos;
+
+		_dirtyFrameChunks[_frameNumber] = 0;
+	}
+	else {
+		// single rendered chunk update (e.g. : block update, ...)
+		for (int i = 0; i < _worldRenderingData._chunksDataColumns.size(); i++)
+		{
+			for (int j = REGION_SIZE_Y - 1; j >= 0; j--)
+			{
+				int chunkNumber = i + j * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
+				// update the chunk on this particular frame if it is marked as dirty, and then un-mark it
+				if (_worldRenderingData.isChunkDirty(_frameNumber, chunkNumber)) {
+
+					memcpy(&(chunksColumnDataSSBO[i]._chunksInColumn[j]), &(_worldRenderingData._chunksDataColumns[i]._chunksInColumn[j]), sizeof(chunksColumnDataSSBO[i]._chunksInColumn[j]));
+
+					_worldRenderingData.markChunkAsUpdated(_frameNumber, chunkNumber);
+				}
+			}
+		}
+	}
+
+	//buffer::copyBuffer(getCurrentFrame()._chunksStagingBuffer._buffer, getCurrentFrame()._chunksStagingBufferAllocInfo, getCurrentFrame()._chunksDataBuffer._buffer, getCurrentFrame()._chunksDataBufferAllocInfo, _transferQueue, _transferCommandBuffer);
 }
 
 void Engine::readbackBuffers(int frameNumber)
 {
 	// read world data SSBO to retrieve brickmaps load queue
 	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getFrame(frameNumber)._worldDataBufferAllocInfo.pMappedData;
+	worldgen::BrickmapsGpuData* brickmapsDataSSBO1 = (worldgen::BrickmapsGpuData*)getFrame(0)._brickmapsDataBufferAllocInfo.pMappedData;
+	worldgen::BrickmapsGpuData* brickmapsDataSSBO2 = (worldgen::BrickmapsGpuData*)getFrame(1)._brickmapsDataBufferAllocInfo.pMappedData;
 
 	uint32_t numberOfBricksToLoad = std::min(worldDataSSBO->_brickLoadQueueCount, uint32_t(BRICKMAP_QUEUE_SIZE));
 
 	if (numberOfBricksToLoad == 0)
 		return;
+
+	// remember the edited chunk to mark them as dirty once all the bricks have been updated
+	std::vector<int> editedChunks;
 
 	// retrieve each unloaded brick
 	// their indices are available in the _chunksDataColumns, but not their data
@@ -1020,10 +1142,14 @@ void Engine::readbackBuffers(int frameNumber)
 		int loadedChunkIndex = brickPositions.x + brickPositions.y * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
 		worldgen::BrickChunk* chunk = _worldRenderingData._gpuLoadedChunks[loadedChunkIndex];
 
+		// prevent bad array access in case loaded chunks were updated
+		if (_worldRenderingData.isChunkDirty(frameNumber, loadedChunkIndex))
+			continue;
+
 		// stage loaded brick in CPU side, it will be upload in the SSBO on next frame (in drawWorld function)
 
 		// get chunk data in the chunk column given its y position
-		worldgen::ChunkGpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
+		worldgen::ChunkCpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
 
 		// skip if already loaded by one of the precedent frames (because we have 2 frames with 2 different SSBOS that are not synced together on GPU side, but share the same CPU side datas)
 		if (chunkData->_brickmaps[brickPositions.z] & BRICKMAP_LOADED_BIT)
@@ -1031,11 +1157,47 @@ void Engine::readbackBuffers(int frameNumber)
 
 		// update chunk data that will be send to GPU
 		chunkData->_brickmaps[brickPositions.z] = BRICKMAP_LOADED_BIT | (intersectionData & BRICKMAP_LOD_BITS) | (intersectionData & BRICKMAP_INDEX_BITS);
-		chunkData->_brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+
+		// two cases : the chunk already have a brickmaps data struct associated to it (so dataIndex is already indicated), or it hasn't and we have to find one that is available in the buffer
+
+		if (chunkData->_dataIndex >= 0) {
+			// case 1
+			 
+			// save brickmap data and upload it
+			brickmapsDataSSBO1[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+			brickmapsDataSSBO2[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
+			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+		}
+		else {
+			// case 2
+
+			// retrieve the first available (that is, mark as unused) brickmapdata struct and save the new datas in it, then mark it as used
+			for (int i = 0; i < _worldRenderingData._brickmapsData.size(); i++) {
+				if (_worldRenderingData._brickmapsData[i]._used == false) {
+					// reference brickmaps data position in our chunk data
+					chunkData->_dataIndex = i;
+
+					// save brickmap data and upload it
+					brickmapsDataSSBO1[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+					brickmapsDataSSBO2[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
+					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+					break;
+				}
+			}
+		}
+		
+		editedChunks.push_back(loadedChunkIndex);
 	}
 
-	// reset worlddata queues for next readback
-	_worldRenderingData.resetQueues();
+	for (auto chunkIndex : editedChunks) {
+		// chunk data has been fully updated, so mark the chunk as dirty
+		_worldRenderingData.markChunkAsDirty(chunkIndex);
+	}
+
+	// reset queue count
+	worldDataSSBO->_brickLoadQueueCount = 0;
 }
 
 void Engine::initWorld()

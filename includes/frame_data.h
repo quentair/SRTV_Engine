@@ -19,11 +19,15 @@ struct FrameData {
 	buffer::AllocatedBuffer _worldDataBuffer;
 	buffer::AllocatedBuffer _viewDistanceGridBuffer;
 	buffer::AllocatedBuffer _chunksDataBuffer;
+	buffer::AllocatedBuffer _brickmapsDataBuffer;
+	//buffer::AllocatedBuffer _chunksStagingBuffer;
 
 	// buffers allocations
 	VmaAllocationInfo _worldDataBufferAllocInfo;
 	VmaAllocationInfo _viewDistanceGridAllocInfo;
 	VmaAllocationInfo _chunksDataBufferAllocInfo;
+	VmaAllocationInfo _brickmapsDataBufferAllocInfo;
+	//VmaAllocationInfo _chunksStagingBufferAllocInfo;
 
 	// descriptors sets
 	VkDescriptorSet _worldgenDescriptorSet;

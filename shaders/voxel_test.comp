@@ -26,7 +26,6 @@ const uint N_SUBMASKS = (BRICKMAP_SIZE*BRICKMAP_SIZE*BRICKMAP_SIZE) / 32;
 
 const uint CHUNK_SIZE = 16;
 const uint CHUNK_VOXEL_RESOLUTION = CHUNK_SIZE * BRICKMAP_SIZE;
-const uint INITIAL_GPU_BRICKMAP_NUMBER = CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE;
 
 //const uint REGION_SIZE_XZ = 32;
 const uint REGION_SIZE_Y = 4;
@@ -44,9 +43,13 @@ struct Brickmap{
     uint presenceMask[N_SUBMASKS];
 };
 
+struct BrickmapData{
+    Brickmap brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
+};
+
 struct ChunkData{
 	uint brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE]; // array of brickmap indices to retrieve from brickmap buffer
-    Brickmap brickmapsData[INITIAL_GPU_BRICKMAP_NUMBER];
+    int dataIndex; // indicates where the brickmap datas are situated in the brickmap data buffer
 };
 
 struct ChunksColumnData{
@@ -79,6 +82,12 @@ layout(std430, set = 1, binding = 2) buffer ChunksBuffer{
 	ChunksColumnData chunksColumnData[];
 } chunksBuffer;
 
+// brickmap data SSBO
+layout(std430, set = 1, binding = 3) buffer BrickmapDataBuffer{
+
+	BrickmapData brickmapsData[];
+} brickmapDataBuffer;
+
 // camera space axis push constant block //
 layout( push_constant ) uniform constants
 {
@@ -86,6 +95,7 @@ layout( push_constant ) uniform constants
     vec4 cameraFront;
     vec4 cameraUp;
     vec4 cameraRight;
+    vec4 viewgridAnchorWorldPos;
     uint viewDistance;
     uint lodDistance2x2x2;
 } PushConstant;
@@ -109,7 +119,7 @@ bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDir
     return intersection;
 }
 
-bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) {
+bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint LOD_Info, vec3 brickNormal) {
     // 3D DDA algorithm
 
     // our brick is a XYZ axis aligned 3d grid composed of voxels
@@ -220,9 +230,6 @@ bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance,
 
         // retrieve the indices of our lod voxel
         uint voxelIndex = (mapPos.x + mapPos.y * 2 + mapPos.z * 4);
-
-        // retrieve LOD from chunk intersection infos
-        uint LOD_Info = (chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition] & BRICKMAP_LOD_BIT) >> 12;
 
         // calculate the distance of the ray to the lod voxel
         // going one step back, because in the DDA steps above we went one step further to end up inside the voxel
@@ -387,6 +394,14 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     // normal of our voxel side (begin by the side from which we exited our brick)
     vec3 outNormal = brickNormal;
 
+    // retrieve brickmap datas
+    //Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickPosition];
+    uint brickmapIndex = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].dataIndex;
+    if(brickmapIndex < 0) {
+        return false;
+    }
+    Brickmap bmapData = brickmapDataBuffer.brickmapsData[brickmapIndex].brickmaps[brickPosition];
+
     // DDA
     while(true) {
 
@@ -400,9 +415,6 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 		if (stepAxis != -1) {
 			updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
 		}
-
-        // check chunk intersection infos
-        Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickPosition];
 
         if((bmapData.presenceMask[submask] & (1 << voxelIndex)) > 0)
         {
@@ -566,7 +578,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     // DDA
     while(true) {
 
-        // retrieve the indices of our chunk and our brick
+        // retrieve the indices of our brick
         uint brickPosition = mapPos.x + mapPos.z  * CHUNK_SIZE + mapPos.y * CHUNK_SIZE * CHUNK_SIZE;
 
         // calculate the distance of the ray to the brick
@@ -580,7 +592,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 		}
 
         // check chunk intersection infos
-        uint intersect = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition];
+        uint intersectionInfos = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmaps[brickPosition];
 
         float subDistance = 0.f;
 
@@ -597,12 +609,15 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
             // note : displace the ray given the chunk exit side normal (if we ray goes up, normal will be (0, 1, 0))
             vec3 newOrigin = rayOrigin + rayDirection * updateTraveledDistance + outNormal * epsilon;
 
-            if(intersectLOD(newOrigin, rayDirection, subDistance, intersectionNormal, chunkIndex, columnIndex, brickPosition, outNormal)) {
+            // retrieve LOD from chunk intersection infos
+            uint LOD_Info = (intersectionInfos & BRICKMAP_LOD_BIT) >> 12;
+
+            if(intersectLOD(newOrigin, rayDirection, subDistance, intersectionNormal, LOD_Info, outNormal)) {
                 traveledDistance = updateTraveledDistance + subDistance;
                 return true;
             }
         }
-        else if((intersect & BRICKMAP_LOADED_BIT) > 0)
+        else if((intersectionInfos & BRICKMAP_LOADED_BIT) > 0)
         {
             // world position at which we intersect our chunk
             float epsilon = 0.005f;
@@ -615,7 +630,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
                 return true;
             }
         }
-        else if((intersect & BRICKMAP_UNLOADED_BIT) > 0)
+        else if((intersectionInfos & BRICKMAP_UNLOADED_BIT) > 0)
         {
             // mark the SSBO value as resquested
             // use atomic operation to prevent other modification of data during the operation
@@ -692,15 +707,8 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
 
     uint viewDistance = PushConstant.viewDistance;
 
-    // convert origin position from world space to viewgrid local space
-    // note : camera is always at the center cell of the viewgrid
-    ivec2 viewGridCenter = ivec2(viewDistance, viewDistance);
-
-    vec3 cameraPosition = PushConstant.cameraPosition.xyz;
-
-    vec3 rayDisplacement = rayOrigin - cameraPosition;
-
-    vec3 localOrigin = vec3(CHUNK_VOXEL_RESOLUTION * viewGridCenter.x + mod(floor(cameraPosition.x), CHUNK_VOXEL_RESOLUTION) + fract(cameraPosition.x), cameraPosition.y, CHUNK_VOXEL_RESOLUTION * viewGridCenter.y + mod(floor(cameraPosition.z), CHUNK_VOXEL_RESOLUTION) + fract(cameraPosition.z)) + rayDisplacement;
+    // convert ray origin position from world space to viewgrid local space
+    vec3 localOrigin = vec3(rayOrigin.x - PushConstant.viewgridAnchorWorldPos.x, rayOrigin.y, rayOrigin.z - PushConstant.viewgridAnchorWorldPos.y);
 
     // convert local origin to 3D grid position
     vec3 gridPos = vec3(localOrigin.x / float(CHUNK_VOXEL_RESOLUTION), localOrigin.y / float(CHUNK_VOXEL_RESOLUTION), localOrigin.z / float(CHUNK_VOXEL_RESOLUTION));

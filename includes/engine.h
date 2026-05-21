@@ -60,7 +60,7 @@ public:
 	VkDevice _device;
 
 	// window
-	VkExtent2D _windowExtent{ 1700 , 900 };
+	VkExtent2D _windowExtent{ 1920 , 1080 };
 	SDL_Window* _window;
 	bool _relativeMode{ true };
 	void createSdlWindow();
@@ -93,13 +93,19 @@ public:
 	int _frameNumber{ 0 };
 	FrameData& getCurrentFrame() { return _frames[_frameNumber]; }
 	FrameData& getFrame(int frameNumber) { return _frames[frameNumber]; }
+	int _dirtyFrameChunks[FRAME_OVERLAP]; // indicates if all the chunks on our frames are out of date
+	void markFramesChunksAsDirty() { for (int i = 0; i < FRAME_OVERLAP; i++) _dirtyFrameChunks[i] = 1; }
 
 	// commands
+	VkCommandPool _transferCommandPool;
+	VkCommandBuffer _transferCommandBuffer;
 	void initCommands();
 
-	// queue
+	// queues
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
+	VkQueue _transferQueue;
+	uint32_t _transferQueueFamily;
 	void initDrawImage();
 
 	// synchronisation structures
@@ -135,6 +141,7 @@ public:
 
 	// buffers
 	void initBuffers();
+	void copyBuffers(int frameNumber);
 	void readbackBuffers(int frameNumber);
 
 	// world CPU side
@@ -146,6 +153,7 @@ public:
 	// world data for rendering
 	worldgen::GpuWorld _worldRenderingData{};
 	uint32_t _lodDistance2x2x2 = BASE_LOD_DISTANCE_2x2x2;
+	glm::vec2 _gpuViewgridAnchorWorldPos; // world position of the bottom left chunk of our viewgrid
 
 	// world generation
 	worldgen::WorldGenerator _worldGenerator{};

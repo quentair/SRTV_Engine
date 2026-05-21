@@ -12,6 +12,7 @@ struct ComputeShaderPushConstant {
 	glm::vec4 _cameraFront;
 	glm::vec4 _cameraUp;
 	glm::vec4 _cameraRight;
+	glm::vec4 _viewgridAnchorWorldPos;
 	uint32_t _viewDistance;
 	uint32_t _lodDistance2x2x2;
 };

@@ -21,8 +21,6 @@ constexpr  uint32_t BRICKMAP_INDEX_BITS = 0b00000000000000000000111111111111; //
 
 constexpr  uint32_t BRICKMAP_LOD_BITS = 0b00000000000011111111000000000000;
 
-constexpr int INITIAL_GPU_BRICKMAPS_NUMBER = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // initial number of brickmaps allocated for a chunk in the GPU (1 area worth of brickmaps here)
-
 namespace srtv_engine::worldgen {
 
 // x : horizontal axis ; y : vertical axis ; z : depth axis
