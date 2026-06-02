@@ -1074,7 +1074,7 @@ void Engine::copyBuffers(int frameNumber)
 	}
 
 	// in case the whole view area needs to be updated
-	if (_dirtyFrameChunks[_frameNumber] == 1) {
+	if (_dirtyFrameChunks[_frameNumber] == true) {
 		// whole rendered chunks update (e.g. : player changed from chunk, ...)
 		for (int i = 0; i < _worldRenderingData._chunksDataColumns.size(); i++)
 		{
@@ -1090,7 +1090,7 @@ void Engine::copyBuffers(int frameNumber)
 		// update anchor position on the GPU if we updated our chunks and the trasnfer to the GPU is fully done
 		_gpuViewgridAnchorWorldPos = _worldRenderingData._viewgridAnchorWorldPos;
 
-		_dirtyFrameChunks[_frameNumber] = 0;
+		_dirtyFrameChunks[_frameNumber] = false;
 	}
 	else {
 		// single rendered chunk update (e.g. : block update, ...)
@@ -1117,16 +1117,39 @@ void Engine::readbackBuffers(int frameNumber)
 {
 	// read world data SSBO to retrieve brickmaps load queue
 	worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getFrame(frameNumber)._worldDataBufferAllocInfo.pMappedData;
-	worldgen::BrickmapsGpuData* brickmapsDataSSBO1 = (worldgen::BrickmapsGpuData*)getFrame(0)._brickmapsDataBufferAllocInfo.pMappedData;
-	worldgen::BrickmapsGpuData* brickmapsDataSSBO2 = (worldgen::BrickmapsGpuData*)getFrame(1)._brickmapsDataBufferAllocInfo.pMappedData;
+	worldgen::BrickmapsGpuData* brickmapsDataSSBO = (worldgen::BrickmapsGpuData*)getFrame(frameNumber)._brickmapsDataBufferAllocInfo.pMappedData;
+
+	// remember the edited chunk to mark them as dirty once all the bricks have been updated
+	std::vector<int> editedChunks;
+
+	// brickmaps data updates based on previous readback operation results for this frame
+	for (int i = 0; i < _worldRenderingData._dirtyBrickmapsQueue[frameNumber].size(); i++) {
+
+		glm::ivec4 brickPositions = _worldRenderingData._dirtyBrickmapsQueue[frameNumber][i]; // from shaders, we know that it represents ivec3(chunkIndex, columnIndex, brickPosition)
+
+		// retieve chunk from cache, giving access to its bricks datas
+		int loadedChunkIndex = brickPositions.x + brickPositions.y * (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
+
+		// prevent bad array access in case loaded chunks were updated
+		if (_worldRenderingData.isChunkDirty(frameNumber, loadedChunkIndex))
+			continue;
+
+		// get chunk data in the chunk column given its y position
+		worldgen::ChunkCpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
+
+		// upload brickmap data
+		brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = *(_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z]);
+
+		editedChunks.push_back(loadedChunkIndex);
+	}
+
+	// clear queue
+	_worldRenderingData._dirtyBrickmapsQueue[frameNumber].clear();
 
 	uint32_t numberOfBricksToLoad = std::min(worldDataSSBO->_brickLoadQueueCount, uint32_t(BRICKMAP_QUEUE_SIZE));
 
 	if (numberOfBricksToLoad == 0)
 		return;
-
-	// remember the edited chunk to mark them as dirty once all the bricks have been updated
-	std::vector<int> editedChunks;
 
 	// retrieve each unloaded brick
 	// their indices are available in the _chunksDataColumns, but not their data
@@ -1151,23 +1174,21 @@ void Engine::readbackBuffers(int frameNumber)
 		// get chunk data in the chunk column given its y position
 		worldgen::ChunkCpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
 
-		// skip if already loaded by one of the precedent frames (because we have 2 frames with 2 different SSBOS that are not synced together on GPU side, but share the same CPU side datas)
-		if (chunkData->_brickmaps[brickPositions.z] & BRICKMAP_LOADED_BIT)
-			continue;
-
 		// update chunk data that will be send to GPU
 		chunkData->_brickmaps[brickPositions.z] = BRICKMAP_LOADED_BIT | (intersectionData & BRICKMAP_LOD_BITS) | (intersectionData & BRICKMAP_INDEX_BITS);
 
 		// two cases : the chunk already have a brickmaps data struct associated to it (so dataIndex is already indicated), or it hasn't and we have to find one that is available in the buffer
-
 		if (chunkData->_dataIndex >= 0) {
 			// case 1
 			 
 			// save brickmap data and upload it
-			brickmapsDataSSBO1[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
-			brickmapsDataSSBO2[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+			brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
 			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
 			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+
+			// for second frame, save to queue and load before next readback
+			int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
+			_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
 		}
 		else {
 			// case 2
@@ -1179,10 +1200,14 @@ void Engine::readbackBuffers(int frameNumber)
 					chunkData->_dataIndex = i;
 
 					// save brickmap data and upload it
-					brickmapsDataSSBO1[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
-					brickmapsDataSSBO2[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
+					brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
 					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
 					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+
+					// for second frame, save to queue
+					int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
+					_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
+
 					break;
 				}
 			}
@@ -1193,7 +1218,7 @@ void Engine::readbackBuffers(int frameNumber)
 
 	for (auto chunkIndex : editedChunks) {
 		// chunk data has been fully updated, so mark the chunk as dirty
-		_worldRenderingData.markChunkAsDirty(chunkIndex);
+		_worldRenderingData.markChunkAsDirty(frameNumber, chunkIndex);
 	}
 
 	// reset queue count

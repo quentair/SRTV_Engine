@@ -73,6 +73,9 @@ add_executable(SRTVEngine
 
 	world_generator.cpp
 	${INCLUDE_DIR}/parameters.h
+
+	block_type.cpp
+	${INCLUDE_DIR}/block_type.h
 	)
 
 ## add include files

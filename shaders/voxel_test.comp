@@ -8,21 +8,40 @@ layout (local_size_x = 16, local_size_y = 16) in;
 layout(rgba16f,set = 0, binding = 0) uniform image2D image;
 
 // ray structure
-struct Ray {
+struct Ray 
+{
     vec3 origin;
     vec3 direction;
 };
 
 // sunlight structure
-struct Sunlight {
+struct Sunlight 
+{
     vec3 lightDir;
     vec3 lightColor;
 };
+
+// block type
+struct BlockType
+{
+    uint typeId;
+    vec4 blockColor;
+};
+
+const uint N_BLOCK_TYPE = 4;
+
+BlockType blockTypeAtlas[N_BLOCK_TYPE] = BlockType[](
+	BlockType(0, vec4(0.0, 1.0, 1.0, 1.0)), // undefined block always at index 0 (just in case for now)
+	BlockType(1, vec4(0.0, 0.0, 0.0, 0.0)), // air
+	BlockType(2, vec4(0.57, 0.83, 0.34, 1.0)), // grass
+	BlockType(3, vec4(0.65, 0.65, 0.65, 1.0)) // stone
+);
 
 // SSBOs //
 
 const uint BRICKMAP_SIZE = 8;
 const uint N_SUBMASKS = (BRICKMAP_SIZE*BRICKMAP_SIZE*BRICKMAP_SIZE) / 32;
+const uint N_PALETTE_ENTRIES = BRICKMAP_SIZE*BRICKMAP_SIZE*BRICKMAP_SIZE / 4;
 
 const uint CHUNK_SIZE = 16;
 const uint CHUNK_VOXEL_RESOLUTION = CHUNK_SIZE * BRICKMAP_SIZE;
@@ -39,24 +58,29 @@ const uint BRICKMAP_REQUESTED_BIT = 2147483648;
 const uint BRICKMAP_INDEX_BIT = 4095;
 const uint BRICKMAP_LOD_BIT = 1044480;
 
-struct Brickmap{
+struct Brickmap
+{
     uint presenceMask[N_SUBMASKS];
+    uint blockPalette[N_PALETTE_ENTRIES];
 };
 
 struct BrickmapData{
     Brickmap brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
 };
 
-struct ChunkData{
+struct ChunkData
+{
 	uint brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE]; // array of brickmap indices to retrieve from brickmap buffer
     int dataIndex; // indicates where the brickmap datas are situated in the brickmap data buffer
 };
 
-struct ChunksColumnData{
+struct ChunksColumnData
+{
 	ChunkData chunksInColumn[REGION_SIZE_Y]; // array of brickmap indices to retrieve from brickmap buffer
 };
 
-struct WorldData{
+struct WorldData
+{
     //Brickmap bricksQueue[BRICKMAP_QUEUE_SIZE];
     //uint indicesQueue[BRICKMAP_QUEUE_SIZE];
 
@@ -65,26 +89,26 @@ struct WorldData{
 };
 
 // world SSBO
-layout(std430, set = 1, binding = 0) buffer WorldBuffer{
-
+layout(std430, set = 1, binding = 0) buffer WorldBuffer
+{
 	WorldData worldData;
 } worldBuffer;
 
 // view distance grid SSBO
-layout(std430, set = 1, binding = 1) readonly buffer ViewDistanceGridBuffer{
-
+layout(std430, set = 1, binding = 1) readonly buffer ViewDistanceGridBuffer
+{
 	uint viewDistanceGrid[]; // array of chunk presence, parse and retrieve data at same incides from chunk buffer
 } viewDistanceGridBuffer;
 
 // chunks SSBO
-layout(std430, set = 1, binding = 2) buffer ChunksBuffer{
-
+layout(std430, set = 1, binding = 2) buffer ChunksBuffer
+{
 	ChunksColumnData chunksColumnData[];
 } chunksBuffer;
 
 // brickmap data SSBO
-layout(std430, set = 1, binding = 3) buffer BrickmapDataBuffer{
-
+layout(std430, set = 1, binding = 3) buffer BrickmapDataBuffer
+{
 	BrickmapData brickmapsData[];
 } brickmapDataBuffer;
 
@@ -102,7 +126,8 @@ layout( push_constant ) uniform constants
 
 ////////////// INTERSECTIONS TESTS //////////////
 
-bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDirection, out float tMin) {
+bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDirection, out float tMin) 
+{
     vec3 t1 = (boxOrigin - rayOrigin) / rayDirection;
     vec3 t2 = (boxEnd - rayOrigin) / rayDirection;
 
@@ -119,7 +144,8 @@ bool rayBoxIntersection(vec3 boxOrigin, vec3 boxEnd, vec3 rayOrigin, vec3 rayDir
     return intersection;
 }
 
-bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint LOD_Info, vec3 brickNormal) {
+bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint LOD_Info, vec3 brickNormal) 
+{
     // 3D DDA algorithm
 
     // our brick is a XYZ axis aligned 3d grid composed of voxels
@@ -288,7 +314,8 @@ bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance,
     return false;
 }
 
-bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) {
+bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, out uint voxelBlockType, uint chunkIndex, uint columnIndex, uint brickPosition, vec3 brickNormal) 
+{
     // 3D DDA algorithm
 
     // our brick is a XYZ axis aligned 3d grid composed of voxels
@@ -421,6 +448,14 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
             traveledDistance = updateTraveledDistance;
             // transfer voxel normal for light calculation (inversed because outNormal is the normal of the side where we exited the last element, be it a brick or a voxel, and we entered from the opposite side, so opposite normal)
             intersectionNormal = -outNormal;
+
+            // retrieve voxel block type in palette array (4 voxels per array index), use left and right offset to retrieve the 8 bits out of 32 corresponding to this voxel
+            uint paletteIndex = (mapPos.x + mapPos.z * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE) / 4;
+            uint offsetRight = (mapPos.x + mapPos.z * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE) % 4 * 8;
+            uint offsetLeft = 24 - offsetRight; //(e.g to retrieve bits 8 to 15, we have 8 voxels at the right and 24-8 = 16 voxels at the left to get rid off)
+            
+            voxelBlockType = (bmapData.blockPalette[paletteIndex] << offsetLeft) >> (offsetRight + offsetLeft); // get rid of left bits first, then right bits + bits that were added from left shift
+            
             return true;
         }
 
@@ -464,7 +499,8 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     return false;
 }
 
-bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, uint chunkIndex, uint columnIndex, vec3 chunkNormal) {
+bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, out uint voxelBlockType, uint chunkIndex, uint columnIndex, vec3 chunkNormal) 
+{
     // 3D DDA algorithm
 
     // our chunk is a XYZ axis aligned 3d grid composed of bricks
@@ -614,6 +650,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
 
             if(intersectLOD(newOrigin, rayDirection, subDistance, intersectionNormal, LOD_Info, outNormal)) {
                 traveledDistance = updateTraveledDistance + subDistance;
+                voxelBlockType = 0;
                 return true;
             }
         }
@@ -625,7 +662,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
             // note : displace the ray given the chunk exit side normal (if we ray goes up, normal will be (0, 1, 0))
             vec3 newOrigin = rayOrigin + rayDirection * updateTraveledDistance + outNormal * epsilon;
 
-            if(intersectBrick(newOrigin, rayDirection, subDistance, intersectionNormal, chunkIndex, columnIndex, brickPosition, outNormal)) {
+            if(intersectBrick(newOrigin, rayDirection, subDistance, intersectionNormal, voxelBlockType, chunkIndex, columnIndex, brickPosition, outNormal)) {
                 traveledDistance = updateTraveledDistance + subDistance;
                 return true;
             }
@@ -698,7 +735,8 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     return false;
 }
 
-bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal) {
+bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance, out vec3 intersectionNormal, out uint voxelBlockType) 
+{
     // 3D DDA algorithm
     // our viewgrid is a 2d grid containing columns of chunks
     // here, we intersect a column of chunks in our 2D viewgrid by stepping in the X and Z axis. We are also stepping in Y axis to retrieve the proper chunk in the column. So we behave like it is a 3D grid (but with 2 sample sources)
@@ -842,7 +880,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
             // retrieve chunk column height
             uint columnIndex = mapPos.y;
 
-            if(intersectChunk(newOrigin, rayDirection, subDistance, intersectionNormal, chunkColumnIndex, columnIndex, outNormal)) {
+            if(intersectChunk(newOrigin, rayDirection, subDistance, intersectionNormal, voxelBlockType, chunkColumnIndex, columnIndex, outNormal)) {
                 traveledDistance = updateTraveledDistance + subDistance;
                 return true;
             }
@@ -888,6 +926,14 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
     return false;
 }
 
+vec4 mapVoxelColor(uint blockTypeId) 
+{
+    if(blockTypeId < 0 || blockTypeId >= N_BLOCK_TYPE)
+        blockTypeId = 0;
+    
+    return blockTypeAtlas[blockTypeId].blockColor;
+}
+
 void main() 
 {
     ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
@@ -908,9 +954,6 @@ void main()
     ray.origin = cameraPosition;
     ray.direction = normalize(uv_x * cameraRight + uv_y * cameraUp + cameraForward);
 
-    // default voxel color
-    vec4 voxelColor = vec4(1.0, 1.0, 1.0, 1.0);
-
     // quick gradient sky color
     vec4 color = vec4(vec3(0.3,0.5,1.0)*(1.0-ray.direction.y), 1.0);
 
@@ -928,8 +971,11 @@ void main()
     // normal of the side of the intersected voxel/brick/chunk
     vec3 intersectionNormal = ivec3(0,0,0);
 
+    // intersected voxel color
+    uint voxelBlockType = 0;
+
     // intersection test with our terrain (DDA algorithm)
-    bool intersection = intersectViewGrid(ray.origin, ray.direction, t, intersectionNormal);
+    bool intersection = intersectViewGrid(ray.origin, ray.direction, t, intersectionNormal, voxelBlockType);
 
     vec3 hitPoint = ray.origin + ray.direction * t;
 
@@ -949,11 +995,14 @@ void main()
         vec3 intersectionNormalShadow = ivec3(0,0,0);
         float tShadow = 0;
         float shadowFactor = 1.0;
+        uint shadowIntersectionBlockType = 0;
 
-        bool inShadow = intersectViewGrid(newOrigin, -sun.lightDir, tShadow, intersectionNormalShadow);
+        bool inShadow = intersectViewGrid(newOrigin, -sun.lightDir, tShadow, intersectionNormalShadow, shadowIntersectionBlockType);
 
         if(inShadow)
             shadowFactor = 0.0;
+
+        vec4 voxelColor = mapVoxelColor(voxelBlockType);
 
         color = vec4((diffuseLightColor * shadowFactor) + ambientLightColor, 1.0) * voxelColor;
     }

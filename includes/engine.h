@@ -93,8 +93,8 @@ public:
 	int _frameNumber{ 0 };
 	FrameData& getCurrentFrame() { return _frames[_frameNumber]; }
 	FrameData& getFrame(int frameNumber) { return _frames[frameNumber]; }
-	int _dirtyFrameChunks[FRAME_OVERLAP]; // indicates if all the chunks on our frames are out of date
-	void markFramesChunksAsDirty() { for (int i = 0; i < FRAME_OVERLAP; i++) _dirtyFrameChunks[i] = 1; }
+	bool _dirtyFrameChunks[FRAME_OVERLAP]; // indicates if all the chunks on our frames are out of date
+	void markFramesChunksAsDirty() { for (int i = 0; i < FRAME_OVERLAP; i++) _dirtyFrameChunks[i] = true; }
 
 	// commands
 	VkCommandPool _transferCommandPool;

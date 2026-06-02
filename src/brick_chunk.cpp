@@ -59,6 +59,13 @@ void BrickChunk::generate(uint16_t x, uint16_t y, uint16_t z)
 							// generate only if there are voxels to generate in the brickmap (this means the random height reached this brickmap lowest xz plan)
 							if (y + chunkY * BRICKMAP_SIZE + brickmapY < height) {
 								brick.notifyVoxelPresence(brickmapX, brickmapY, brickmapZ);
+								// generates grass on upper blocks, stone under it and air otherwise (voxel not generated)
+								if (y + chunkY * BRICKMAP_SIZE + brickmapY > 195) {
+									brick.setBlockType(brickmapX, brickmapY, brickmapZ, 2);
+								}
+								else {
+									brick.setBlockType(brickmapX, brickmapY, brickmapZ, 3);
+								}
 								generated = true;
 								//lod_4x4x4 |= 1 << (((brickmapX & 0b110) >> 1) + ((brickmapZ & 0b110) << 1) + ((brickmapY & 0b110) << 3));
 								lod_2x2x2 |= 1 << (((brickmapX & 0b100) >> 2) + ((brickmapZ & 0b100) >> 1) + (brickmapY & 0b100));

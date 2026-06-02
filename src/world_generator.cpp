@@ -49,12 +49,12 @@ void WorldGenerator::generateRegion(WorldRegion& region, glm::vec3 playerWorldPo
 
     // limit grid coordinates to sample between [0, 0, 0] and [REGION_SIZE_XZ - 1, 0, REGION_SIZE_XZ - 1]
     glm::ivec3 chunkGridBottomLeftCorner = glm::ivec3( std::clamp(viegGridBottomLeftCorner.x, 0, REGION_SIZE_XZ - 1), 0, std::clamp(viegGridBottomLeftCorner.z, 0, REGION_SIZE_XZ - 1) );
-    glm::ivec3 chungGirdUpperRightCorner = glm::ivec3( std::clamp(viewGridUpperRightCorner.x, 0, REGION_SIZE_XZ - 1), 0, std::clamp(viewGridUpperRightCorner.z, 0, REGION_SIZE_XZ - 1) );
+    glm::ivec3 chungGridUpperRightCorner = glm::ivec3( std::clamp(viewGridUpperRightCorner.x, 0, REGION_SIZE_XZ - 1), 0, std::clamp(viewGridUpperRightCorner.z, 0, REGION_SIZE_XZ - 1) );
 
     // load all chunks of the region inside generation distance
     for (int yRegion = REGION_SIZE_Y - 1; yRegion >= 0; yRegion--) {
-        for (int xRegion = chunkGridBottomLeftCorner.x; xRegion <= chungGirdUpperRightCorner.x; xRegion++) {
-            for (int zRegion = chunkGridBottomLeftCorner.z; zRegion <= chungGirdUpperRightCorner.z; zRegion++) {
+        for (int xRegion = chunkGridBottomLeftCorner.x; xRegion <= chungGridUpperRightCorner.x; xRegion++) {
+            for (int zRegion = chunkGridBottomLeftCorner.z; zRegion <= chungGridUpperRightCorner.z; zRegion++) {
 
                 if (stopGeneration.load()) {
                     return;

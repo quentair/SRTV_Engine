@@ -24,11 +24,11 @@ namespace srtv_engine::worldgen {
 // GPU layout
 
 struct BrickmapsGpuData {
-	std::array<Brickmap, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE> _brickmapsData;
+	std::array<Brickmap, CHUNK_BRICKMAP_RESOLUTION> _brickmapsData;
 };
 
 struct ChunkGpuData {
-	std::array<uint32_t, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE> _brickmaps; // array of brickmap infos to parse
+	std::array<uint32_t, CHUNK_BRICKMAP_RESOLUTION> _brickmaps; // array of brickmap infos to parse
 
 	int32_t _dataIndex; // indicates where the brickmap datas are situated in the brickmap data buffer
 };
@@ -48,13 +48,13 @@ struct WorldGpuData {
 // CPU layout
 
 struct BrickmapsCpuData {
-	std::array<Brickmap*, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE> _brickmapsData;
+	std::array<Brickmap*, CHUNK_BRICKMAP_RESOLUTION> _brickmapsData;
 
 	bool _used = false; // specify if the data is currently used (that is, referenced in the chunk grid) or not (and in this case, data will be replaced)
 };
 
 struct ChunkCpuData {
-	std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE> _brickmaps; // array of brickmap infos to parse
+	std::array<uint32_t, CHUNK_BRICKMAP_RESOLUTION> _brickmaps; // array of brickmap infos to parse
 
 	int32_t _dataIndex = -1; // indicates where the brickmap data are situated in the brickmap data buffer
 };
@@ -92,8 +92,11 @@ class GpuWorld {
 
 	uint32_t _viewDistance = BASE_VIEW_DISTANCE;
 
-	// indicates which chunk on the GPU needs to be updated on which frame
-	std::vector<std::vector<int>> _dirtyChunksIndicator = std::vector<std::vector<int>>(2, std::vector<int>(MAX_VIEW_GRID_SIZE* REGION_SIZE_Y, 0));
+	// indicates which chunk on the GPU needs to be updated on which frame (buffer 3 update)
+	std::vector<std::vector<bool>> _dirtyChunksIndicator = std::vector<std::vector<bool>>(2, std::vector<bool>(MAX_VIEW_GRID_SIZE* REGION_SIZE_Y, false));
+
+	// indicates which brickmap on the GPU needs to be updated on which frame (buffer 4 update)
+	std::vector<std::vector<glm::ivec4>> _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
 
 	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
 
@@ -119,7 +122,7 @@ class GpuWorld {
 	// check on all frame
 	bool isChunkDirty(int chunkNumber) {
 		for (auto& frame : _dirtyChunksIndicator) {
-			if (frame[chunkNumber] == 1)
+			if (frame[chunkNumber] == true)
 				return true;
 		}
 		return false;
@@ -127,25 +130,25 @@ class GpuWorld {
 
 	// mark on specific frame
 	void markChunkAsDirty(int frame, int chunkNumber) {
-		_dirtyChunksIndicator[frame][chunkNumber] = 1;
+		_dirtyChunksIndicator[frame][chunkNumber] = true;
 	}
 	
 	// mark on every frame
 	void markChunkAsDirty(int chunkNumber) {
 		for (auto& frame : _dirtyChunksIndicator) {
-			frame[chunkNumber] = 1;
+			frame[chunkNumber] = true;
 		}
 	}
 
 	// mark on specific frame
 	void markChunkAsUpdated(int frame, int chunkNumber) {
-		_dirtyChunksIndicator[frame][chunkNumber] = 0;
+		_dirtyChunksIndicator[frame][chunkNumber] = false;
 	}
 
 	// mark on every frame
 	void markChunkAsUpdated(int chunkNumber) {
 		for (auto& frame : _dirtyChunksIndicator) {
-			frame[chunkNumber] = 0;
+			frame[chunkNumber] = false;
 		}
 	}
 };

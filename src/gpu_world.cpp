@@ -17,6 +17,9 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
             _brickmapsData[i]._used = false;
         }
 
+        // clear queues to prevent out of date brickmap access on GPU readbacks
+        _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
+
     // save the chunks datas that we send to GPU in case the player moved from one chunk to another (so we don't erase datas when we load back new and old chunks to the GPU)
         saveChunks(playerWorldPos);
         _playerLastChunk = centalChunkWorldPos;
@@ -62,6 +65,13 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
 
         // clear the pointer to the chunk to avoid using outdated datas (pointer will be updated later if needed)
         _gpuLoadedChunks[i] = nullptr;
+
+        // clear GPU chunk datas so we don't accidentaly read datas from a chunk that is no longer at this position
+        chunkData->_brickmaps = std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE>{};
+        chunkData->_dataIndex = -1;
+
+        // chunk data was erased, so mark the chunk as dirty
+        markChunkAsDirty(i);
     }
 }
 
@@ -129,18 +139,14 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                     continue;
                 }
 
+                // replace or reaload needed
+
                 // get chunk data in the chunk column given its y position
                 ChunkCpuData* chunkData = &_chunksDataColumns[viewGridIndex]._chunksInColumn[yRegion];
-                
-                // clear GPU chunk datas so we don't accidentaly read datas from a chunk that is no longer at this position
-                chunkData->_brickmaps = std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE>{};
-                //chunkData->_dataIndex = -1;
                 
                 if (chunk == nullptr || chunk->isGenerated() == false) {
                     _viewDistanceGrid[viewGridIndex] |= 0; // indicates that this chunk column might not be generated yet (if at least on chunk of the column is present, it is marked as generated, otherwise, it is not marked)
                     _gpuLoadedChunks[loadedMapIndex] = nullptr; // update array of pointer to chunks that are sent to GPU to avoid unupdated data retrieval later
-                    // chunk data was erased, so mark the chunk as dirty
-                    markChunkAsDirty(loadedMapIndex);
                     continue;
                 }
 

@@ -11,6 +11,8 @@ constexpr uint8_t CHUNK_SIZE = 16; // 16*16*16 bricks into our chunk (4096 indic
 
 constexpr uint8_t CHUNK_VOXEL_RESOLUTION = CHUNK_SIZE * BRICKMAP_SIZE; // number of voxels per dimensions in our chunk
 
+constexpr uint16_t CHUNK_BRICKMAP_RESOLUTION = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // number of brickmaps in our chunk
+
 constexpr  uint32_t BRICKMAP_LOADED_BIT = 0b00100000000000000000000000000000;
 
 constexpr  uint32_t BRICKMAP_UNLOADED_BIT = 0b01000000000000000000000000000000;
