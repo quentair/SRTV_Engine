@@ -14,7 +14,7 @@
 #include <unordered_map>
 
 // max number of brickmaps to send to GPU for loading
-constexpr uint32_t BRICKMAP_QUEUE_SIZE = 1024;
+constexpr uint32_t BRICKMAP_QUEUE_SIZE = 512;
 
 // area of chunks we send to GPU
 constexpr uint32_t MAX_VIEW_GRID_SIZE = (MAX_VIEW_DISTANCE * 2 + 1) * (MAX_VIEW_DISTANCE * 2 + 1);
@@ -24,13 +24,13 @@ namespace srtv_engine::worldgen {
 // GPU layout
 
 struct BrickmapsGpuData {
-	std::array<Brickmap, CHUNK_BRICKMAP_RESOLUTION> _brickmapsData;
+	Brickmap _brickmapData;
 };
 
 struct ChunkGpuData {
 	std::array<uint32_t, CHUNK_BRICKMAP_RESOLUTION> _brickmaps; // array of brickmap infos to parse
 
-	int32_t _dataIndex; // indicates where the brickmap datas are situated in the brickmap data buffer
+	std::array<int32_t, CHUNK_BRICKMAP_RESOLUTION> _dataIndices; // indicates where the brickmap datas are situated in the brickmap data buffer
 };
 
 struct ChunksColumnGpuData {
@@ -48,7 +48,7 @@ struct WorldGpuData {
 // CPU layout
 
 struct BrickmapsCpuData {
-	std::array<Brickmap*, CHUNK_BRICKMAP_RESOLUTION> _brickmapsData;
+	Brickmap* _brickmapData;
 
 	bool _used = false; // specify if the data is currently used (that is, referenced in the chunk grid) or not (and in this case, data will be replaced)
 };
@@ -56,7 +56,13 @@ struct BrickmapsCpuData {
 struct ChunkCpuData {
 	std::array<uint32_t, CHUNK_BRICKMAP_RESOLUTION> _brickmaps; // array of brickmap infos to parse
 
-	int32_t _dataIndex = -1; // indicates where the brickmap data are situated in the brickmap data buffer
+	std::array<int32_t, CHUNK_BRICKMAP_RESOLUTION> _dataIndices; // indicates where the brickmap data are situated in the brickmap data buffer
+
+	// default constructor to properly fill arrays
+	ChunkCpuData() {
+		_brickmaps.fill(0);
+		_dataIndices.fill(-1);
+	}
 };
 
 struct ChunksColumnCpuData {
@@ -76,8 +82,8 @@ class GpuWorld {
 	// Buffer3 : data of chunks organised into columns of chunks
 	std::vector<ChunksColumnCpuData> _chunksDataColumns = std::vector<ChunksColumnCpuData>(MAX_VIEW_GRID_SIZE);
 
-	// Buffer 4 : brickmaps datas
-	std::vector<BrickmapsCpuData> _brickmapsData = std::vector<BrickmapsCpuData>(MAX_VIEW_GRID_SIZE * REGION_SIZE_Y);
+	// Buffer 4 : brickmaps datas (chunk surface is 16 * 16 brickmap, the surface is the maximum view distance, times 4 to have some room)
+	std::vector<BrickmapsCpuData> _brickmapsData = std::vector<BrickmapsCpuData>(MAX_VIEW_GRID_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4);
 
 	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(MAX_VIEW_GRID_SIZE * REGION_SIZE_Y); //  pointer to chunks whose datas are cached for the GPU
 	std::unordered_map<glm::ivec3, ChunkCpuData> _tempChunks; // temporary chunk data hashmap to displace the chunks instead of reloading them if they are still in the view range

@@ -46,11 +46,13 @@ const uint N_PALETTE_ENTRIES = BRICKMAP_SIZE*BRICKMAP_SIZE*BRICKMAP_SIZE / 4;
 const uint CHUNK_SIZE = 16;
 const uint CHUNK_VOXEL_RESOLUTION = CHUNK_SIZE * BRICKMAP_SIZE;
 
+const uint CHUNK_BRICKMAP_RESOLUTION = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+
 //const uint REGION_SIZE_XZ = 32;
 const uint REGION_SIZE_Y = 4;
 
 //const uint VIEW_GRID_SIZE = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
-const uint BRICKMAP_QUEUE_SIZE = 1024;
+const uint BRICKMAP_QUEUE_SIZE = 512;
 
 const uint BRICKMAP_LOADED_BIT = 536870912;
 const uint BRICKMAP_UNLOADED_BIT = 1073741824;
@@ -65,13 +67,13 @@ struct Brickmap
 };
 
 struct BrickmapData{
-    Brickmap brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
+    Brickmap brickmap;
 };
 
 struct ChunkData
 {
-	uint brickmaps[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE]; // array of brickmap indices to retrieve from brickmap buffer
-    int dataIndex; // indicates where the brickmap datas are situated in the brickmap data buffer
+	uint brickmaps[CHUNK_BRICKMAP_RESOLUTION]; // array of brickmap indices to retrieve from brickmap buffer
+    int dataIndices[CHUNK_BRICKMAP_RESOLUTION]; // indicates where the brickmap datas are situated in the brickmap data buffer
 };
 
 struct ChunksColumnData
@@ -421,13 +423,12 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
     // normal of our voxel side (begin by the side from which we exited our brick)
     vec3 outNormal = brickNormal;
 
-    // retrieve brickmap datas
-    //Brickmap bmapData = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].brickmapsData[brickPosition];
-    uint brickmapIndex = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].dataIndex;
+    // retrieve brickmap datas with the index indicated in the chunk buffer
+    uint brickmapIndex = chunksBuffer.chunksColumnData[chunkIndex].chunksInColumn[columnIndex].dataIndices[brickPosition];
     if(brickmapIndex < 0) {
         return false;
     }
-    Brickmap bmapData = brickmapDataBuffer.brickmapsData[brickmapIndex].brickmaps[brickPosition];
+    Brickmap bmapData = brickmapDataBuffer.brickmapsData[brickmapIndex].brickmap;
 
     // DDA
     while(true) {
@@ -692,6 +693,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
             // we still intersected a brick, we requested its load ant will display it on next frame
             traveledDistance = updateTraveledDistance;
             intersectionNormal = -outNormal;
+            voxelBlockType = 0;
 			return true;
         }
 

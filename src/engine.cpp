@@ -890,7 +890,7 @@ void Engine::initDescriptors()
 		ssboWriter.writeBuffer(0, frame._worldDataBuffer._buffer, sizeof(worldgen::WorldGpuData), 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.writeBuffer(1, frame._viewDistanceGridBuffer._buffer, sizeof(uint32_t) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.writeBuffer(2, frame._chunksDataBuffer._buffer, sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-		ssboWriter.writeBuffer(3, frame._brickmapsDataBuffer._buffer, sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * REGION_SIZE_Y, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+		ssboWriter.writeBuffer(3, frame._brickmapsDataBuffer._buffer, sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		ssboWriter.updateSet(_device, frame._worldgenDescriptorSet);
 	}
 
@@ -981,7 +981,7 @@ void Engine::initBuffers()
 
 		VkBufferCreateInfo chunksDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::ChunksColumnGpuData) * MAX_VIEW_GRID_SIZE, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-		VkBufferCreateInfo brickmapsDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * REGION_SIZE_Y, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		VkBufferCreateInfo brickmapsDataBufferCreateInfo = buffer::defaultBufferCreateInfo(sizeof(worldgen::BrickmapsGpuData) * MAX_VIEW_GRID_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 		// buffers for data written by or transferred from the GPU that we want to read back on the CPU
 		VmaAllocationCreateInfo vmaReadbackAllocInfo = {};
@@ -1138,7 +1138,7 @@ void Engine::readbackBuffers(int frameNumber)
 		worldgen::ChunkCpuData* chunkData = &_worldRenderingData._chunksDataColumns[brickPositions.x]._chunksInColumn[brickPositions.y];
 
 		// upload brickmap data
-		brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = *(_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z]);
+		brickmapsDataSSBO[chunkData->_dataIndices[brickPositions.z]]._brickmapData = *(_worldRenderingData._brickmapsData[chunkData->_dataIndices[brickPositions.z]]._brickmapData);
 
 		editedChunks.push_back(loadedChunkIndex);
 	}
@@ -1177,14 +1177,14 @@ void Engine::readbackBuffers(int frameNumber)
 		// update chunk data that will be send to GPU
 		chunkData->_brickmaps[brickPositions.z] = BRICKMAP_LOADED_BIT | (intersectionData & BRICKMAP_LOD_BITS) | (intersectionData & BRICKMAP_INDEX_BITS);
 
-		// two cases : the chunk already have a brickmaps data struct associated to it (so dataIndex is already indicated), or it hasn't and we have to find one that is available in the buffer
-		if (chunkData->_dataIndex >= 0) {
+		// two cases : the brickmap already have a brickmap data struct associated to it (so an index is already indicated in dataIndices), or it hasn't and we have to find one that is available in the buffer
+		if (chunkData->_dataIndices[brickPositions.z] >= 0) {
 			// case 1
 			 
 			// save brickmap data and upload it
-			brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
-			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
-			_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+			brickmapsDataSSBO[chunkData->_dataIndices[brickPositions.z]]._brickmapData = chunk->_brickmaps[brickIndex];
+			_worldRenderingData._brickmapsData[chunkData->_dataIndices[brickPositions.z]]._brickmapData = &chunk->_brickmaps[brickIndex];
+			_worldRenderingData._brickmapsData[chunkData->_dataIndices[brickPositions.z]]._used = true;
 
 			// for second frame, save to queue and load before next readback
 			int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
@@ -1193,24 +1193,33 @@ void Engine::readbackBuffers(int frameNumber)
 		else {
 			// case 2
 
+			bool notFound = true;
+
 			// retrieve the first available (that is, mark as unused) brickmapdata struct and save the new datas in it, then mark it as used
 			for (int i = 0; i < _worldRenderingData._brickmapsData.size(); i++) {
 				if (_worldRenderingData._brickmapsData[i]._used == false) {
 					// reference brickmaps data position in our chunk data
-					chunkData->_dataIndex = i;
+					chunkData->_dataIndices[brickPositions.z] = i;
 
 					// save brickmap data and upload it
-					brickmapsDataSSBO[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = chunk->_brickmaps[brickIndex];
-					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._brickmapsData[brickPositions.z] = &chunk->_brickmaps[brickIndex];
-					_worldRenderingData._brickmapsData[chunkData->_dataIndex]._used = true;
+					brickmapsDataSSBO[i]._brickmapData = chunk->_brickmaps[brickIndex];
+					_worldRenderingData._brickmapsData[i]._brickmapData = &chunk->_brickmaps[brickIndex];
+					_worldRenderingData._brickmapsData[i]._used = true;
 
 					// for second frame, save to queue
 					int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
 					_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
 
+					notFound = false;
+
 					break;
 				}
 			}
+
+			// TODO
+			// no more space left for brickmap case : clear unused brickmaps from array
+			if(notFound)
+				ENGINE_LOG_WARNING("No more room on GPU for new brickmap, consider cleaning the array or add memory space for it");
 		}
 		
 		editedChunks.push_back(loadedChunkIndex);

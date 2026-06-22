@@ -12,10 +12,10 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
 
     if (_playerChangedChunk) {
 
-        for (int i = 0; i < _brickmapsData.size(); i++) {
-            // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
+        // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
+        /*for (int i = 0; i < _brickmapsData.size(); i++) {
             _brickmapsData[i]._used = false;
-        }
+        }*/
 
         // clear queues to prevent out of date brickmap access on GPU readbacks
         _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
@@ -67,8 +67,8 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
         _gpuLoadedChunks[i] = nullptr;
 
         // clear GPU chunk datas so we don't accidentaly read datas from a chunk that is no longer at this position
-        chunkData->_brickmaps = std::array<uint32_t, CHUNK_SIZE* CHUNK_SIZE* CHUNK_SIZE>{};
-        chunkData->_dataIndex = -1;
+        chunkData->_brickmaps.fill(0);
+        chunkData->_dataIndices.fill(-1);
 
         // chunk data was erased, so mark the chunk as dirty
         markChunkAsDirty(i);
@@ -159,9 +159,11 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                 {
                     _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
                     *chunkData = search->second;
-                    if (chunkData->_dataIndex >= 0) {
-                        _brickmapsData[chunkData->_dataIndex]._used = true; // mark the chunk data as used so the array cell is reserved and not replaced later
-                    }
+                    /*for (int i = 0; i < chunkData->_dataIndices.size(); i++) {
+                        if (chunkData->_dataIndices[i] >= 0) {
+                            _brickmapsData[chunkData->_dataIndices[i]]._used = true; // mark the chunk data as used so the brickmapdata buffer cell is reserved and not replaced later
+                        }
+                    }*/
                     continue;
                 }
 
