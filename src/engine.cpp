@@ -600,14 +600,21 @@ void Engine::draw()
 	CHECK_VK_ERROR(vkWaitForFences(_device, 1, &getCurrentFrame()._renderFence, true, 1000000000));
 	CHECK_VK_ERROR(vkResetFences(_device, 1, &getCurrentFrame()._renderFence));
 
+	// We do not manipulate chunk datas if we are rolling the chunks in another thread
+	bool chunkRolling = _worldRenderingData._processingChunk.load();
+
 	// readback of SSBO of precedent asscociated frame to prepare the next frame datas
-	readbackBuffers(_frameNumber);
+	if (!chunkRolling) {
+		readbackBuffers(_frameNumber);
+	}
 
 	// destroy frame-bound data
 	getCurrentFrame()._frameResourceDeletor.flush(_allocator, _device);
 
 	// copye CPU datas to GPU buffers
-	copyBuffers(_frameNumber);
+	if (!chunkRolling) {
+		copyBuffers(_frameNumber);
+	}
 
 	// acquire next image (by index) from the swapchain (1 second timeout)
 	// use semaphore to make sure we have an image from the swapchain to draw onto for the next operations
@@ -1054,6 +1061,14 @@ void Engine::copyBuffers(int frameNumber)
 		_worldRenderingData.loadRegions(_world._registeredRegions, _cameraController._cameraPosition);
 	}
 
+	if (_worldRenderingData._playerChangedChunk) {
+		// if the player changed from chunks, all the actual chunks needs to be displaced (so updated GPU side)
+		markFramesChunksAsDirty();
+		// return because this means we are chunk rolling, so chunk datas are actually manipulated in another thread and we don't want to touch them
+		// rolling state will be checked on next frame
+		return;
+	}
+
 	// write into each world generation SSBO
 	//worldgen::WorldGpuData* worldDataSSBO = (worldgen::WorldGpuData*)getCurrentFrame()._worldDataBufferAllocInfo.pMappedData;
 	uint32_t* viewDistanceGridSSBO = (uint32_t*)getCurrentFrame()._viewDistanceGridAllocInfo.pMappedData;
@@ -1066,11 +1081,6 @@ void Engine::copyBuffers(int frameNumber)
 	for (int i = 0; i < _worldRenderingData._viewDistanceGrid.size(); i++)
 	{
 		viewDistanceGridSSBO[i] = _worldRenderingData._viewDistanceGrid[i];
-	}
-
-	if (_worldRenderingData._playerChangedChunk) {
-		// if the player changed from chunks, all the actual chunks needs to be displaced (so updated GPU side)
-		markFramesChunksAsDirty();
 	}
 
 	// in case the whole view area needs to be updated

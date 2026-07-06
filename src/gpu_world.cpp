@@ -6,25 +6,46 @@ namespace srtv_engine::worldgen {
 
 void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos)
 {
-    glm::ivec3 centalChunkWorldPos = glm::ivec3(floor(playerWorldPos.x / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.y / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.z / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION);
+    glm::ivec3 centralChunkWorldPos = glm::ivec3(floor(playerWorldPos.x / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.y / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.z / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION);
 
-    _playerChangedChunk = centalChunkWorldPos != _playerLastChunk;
+    _playerChangedChunk = centralChunkWorldPos != _playerLastChunk;
 
     if (_playerChangedChunk) {
 
-        // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
-        /*for (int i = 0; i < _brickmapsData.size(); i++) {
-            _brickmapsData[i]._used = false;
-        }*/
+        // start threaded chunk rolling
+        // this could be going on for multiple frames (the time it takes to update all the displayed chunks)
 
-        // clear queues to prevent out of date brickmap access on GPU readbacks
-        _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
+        _processingChunk = true;
+
+        _chunkLoadingThread = std::thread{ &GpuWorld::rollChunks, this, std::ref(regions) , playerWorldPos, centralChunkWorldPos};
+
+        _chunkLoadingThread.detach();
+    }
+    else if (!(_processingChunk.load()))
+    {
+        // if we are not moving datas with chunk rolling, normal frame-time load
+        // load to GPU all chunks in given generated regions that are in the player view range
+        for (auto& r : regions) {
+            if (r == nullptr) {
+                continue;
+            }
+            loadChunks(*r, playerWorldPos);
+        }
+    }
+}
+
+void GpuWorld::rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 centralChunkWorldPos)
+{
+    // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
+    /*for (int i = 0; i < _brickmapsData.size(); i++) {
+        _brickmapsData[i]._used = false;
+    }*/
+
+    // clear queues to prevent out of date brickmap access on GPU readbacks
+    _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
 
     // save the chunks datas that we send to GPU in case the player moved from one chunk to another (so we don't erase datas when we load back new and old chunks to the GPU)
-        saveChunks(playerWorldPos);
-        _playerLastChunk = centalChunkWorldPos;
-        _viewgridAnchorWorldPos = glm::vec2(float(centalChunkWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION, float(centalChunkWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION);
-    }
+    saveChunks(playerWorldPos);
 
     // load to GPU all chunks in given generated regions that are in the player view range
     for (auto& r : regions) {
@@ -33,6 +54,12 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
         }
         loadChunks(*r, playerWorldPos);
     }
+
+    // save new player actual chunk at the end so we don't spawn multiple thread by going back and forth (_playerChangedChunk test), and mark the rolling operation as completed
+    _playerLastChunk = centralChunkWorldPos;
+    _viewgridAnchorWorldPos = glm::vec2(float(centralChunkWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION, float(centralChunkWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION);
+
+    _processingChunk = false;
 }
 
 void GpuWorld::saveChunks(glm::vec3 playerWorldPos)

@@ -12,6 +12,7 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <thread>
 
 // max number of brickmaps to send to GPU for loading
 constexpr uint32_t BRICKMAP_QUEUE_SIZE = 512;
@@ -90,6 +91,10 @@ class GpuWorld {
 
 	bool _playerChangedChunk = false;
 
+	// threads
+	std::thread _chunkLoadingThread;
+	std::atomic<bool> _processingChunk = false; // signal that the rolling operation is done on the thread and chunk can be copied again
+
 	// world position of the chunk where the player was last situated
 	glm::ivec3 _playerLastChunk{ 0, -1, 0 };
 
@@ -105,6 +110,8 @@ class GpuWorld {
 	std::vector<std::vector<glm::ivec4>> _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
 
 	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
+
+	void rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 centralChunkWorldPos);
 
 	void saveChunks(glm::vec3 playerWorldPos);
 
