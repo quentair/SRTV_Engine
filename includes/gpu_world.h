@@ -85,6 +85,7 @@ class GpuWorld {
 
 	// Buffer 4 : brickmaps datas (chunk surface is 16 * 16 brickmap, the surface is the maximum view distance, times 4 to have some room)
 	std::vector<BrickmapsCpuData> _brickmapsData = std::vector<BrickmapsCpuData>(MAX_VIEW_GRID_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4);
+	unsigned int _lastBrickmapsDataIndex = 0; // save last reserved brickmap data vector cell index so we know the next cell not already reserved
 
 	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(MAX_VIEW_GRID_SIZE * REGION_SIZE_Y); //  pointer to chunks whose datas are cached for the GPU
 	std::unordered_map<glm::ivec3, ChunkCpuData> _tempChunks; // temporary chunk data hashmap to displace the chunks instead of reloading them if they are still in the view range
@@ -99,7 +100,7 @@ class GpuWorld {
 	glm::ivec3 _playerLastChunk{ 0, -1, 0 };
 
 	// world position of the bottom left chunk of our viewgrid
-	glm::vec2 _viewgridAnchorWorldPos;
+	glm::vec2 _viewgridAnchorWorldPos{0,0};
 
 	uint32_t _viewDistance = BASE_VIEW_DISTANCE;
 

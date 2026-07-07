@@ -1206,7 +1206,7 @@ void Engine::readbackBuffers(int frameNumber)
 			bool notFound = true;
 
 			// retrieve the first available (that is, mark as unused) brickmapdata struct and save the new datas in it, then mark it as used
-			for (int i = 0; i < _worldRenderingData._brickmapsData.size(); i++) {
+			for (unsigned int i = _worldRenderingData._lastBrickmapsDataIndex; i < _worldRenderingData._brickmapsData.size(); i++) {
 				if (_worldRenderingData._brickmapsData[i]._used == false) {
 					// reference brickmaps data position in our chunk data
 					chunkData->_dataIndices[brickPositions.z] = i;
@@ -1221,6 +1221,8 @@ void Engine::readbackBuffers(int frameNumber)
 					_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
 
 					notFound = false;
+
+					_worldRenderingData._lastBrickmapsDataIndex = i+1;
 
 					break;
 				}
