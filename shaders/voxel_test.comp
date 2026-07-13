@@ -260,7 +260,7 @@ bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance,
         uint voxelIndex = (mapPos.x + mapPos.y * 2 + mapPos.z * 4);
 
         // calculate the distance of the ray to the lod voxel
-        // going one step back, because in the DDA steps above we went one step further to end up inside the voxel
+        // going one step back, because in the previous DDA step we went one step further to sample the next corresponding axis aligned voxel
 		float updateTraveledDistance = 0.f;
 		if (stepAxis != -1) {
 			updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
@@ -277,6 +277,7 @@ bool intersectLOD(vec3 rayOrigin, vec3 rayDirection, out float traveledDistance,
         }
 
         // jump to next lod voxel, either in x-direction, y-direction, or z-direction
+        // and update the distance the ray has to travel to go from its starting position to the corresponding next axis aligned voxel
         if (sideDist.x < sideDist.y)
         {
             if (sideDist.x < sideDist.z) {
@@ -438,7 +439,7 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         uint voxelIndex = uint(mod(mapPos.x + mapPos.z  * BRICKMAP_SIZE + mapPos.y * BRICKMAP_SIZE * BRICKMAP_SIZE, 32));
 
         // calculate the distance of the ray to the voxel
-        // going one step back, because in the DDA steps above we went one step further to end up inside the voxel
+        // going one step back, because in the previous DDA step we went one step further to sample the next corresponding axis aligned voxel
 		float updateTraveledDistance = 0.f;
 		if (stepAxis != -1) {
 			updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
@@ -461,6 +462,7 @@ bool intersectBrick(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         }
 
         // jump to next voxel, either in x-direction, y-direction, or z-direction
+        // and update the distance the ray has to travel to go from its starting position to the corresponding next axis aligned voxel
         if (sideDist.x < sideDist.y)
         {
             if (sideDist.x < sideDist.z) {
@@ -619,7 +621,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         uint brickPosition = mapPos.x + mapPos.z  * CHUNK_SIZE + mapPos.y * CHUNK_SIZE * CHUNK_SIZE;
 
         // calculate the distance of the ray to the brick
-        // going one step back, because in the DDA steps above we went one step further to end up inside the brick
+        // going one step back, because in the previous DDA step we went one step further to sample the next corresponding axis aligned brick
 		float updateTraveledDistance = 0.f;
 		if (stepAxis != -1) {
 			updateTraveledDistance = sideDist[stepAxis] - deltaDist[stepAxis];
@@ -698,6 +700,7 @@ bool intersectChunk(vec3 rayOrigin, vec3 rayDirection, out float traveledDistanc
         }
 
         // jump to next brick, either in x-direction, y-direction, or z-direction
+        // and update the distance the ray has to travel to go from its starting position to the corresponding next axis aligned brick
         if (sideDist.x < sideDist.y)
         {
             if (sideDist.x < sideDist.z) {
@@ -857,7 +860,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         uint chunkColumnIndex = mapPos.x + mapPos.z * (viewDistance * 2 + 1);
 
         // calculate the distance of the ray to the intersected chunk
-        // going one step back, because in the DDA steps above we went one step further to end up inside a chunk
+        // going one step back, because in the previous DDA step we went one step further to sample the next corresponding axis aligned chunk
 		float updateTraveledDistance = 0.f;
 		if (stepAxis != -1) {
 			updateTraveledDistance = abs(sideDist[stepAxis] - deltaDist[stepAxis]);
@@ -889,6 +892,7 @@ bool intersectViewGrid(vec3 rayOrigin, vec3 rayDirection, out float traveledDist
         }
 
         // jump to next chunk, either in x-direction, y-direction, or z-direction
+        // and update the distance the ray has to travel to go from its starting position to the corresponding next axis aligned chunk
         if (sideDist.x < sideDist.y)
         {
             if (sideDist.x < sideDist.z) {

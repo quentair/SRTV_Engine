@@ -85,7 +85,8 @@ class GpuWorld {
 
 	// Buffer 4 : brickmaps datas (chunk surface is 16 * 16 brickmap, the surface is the maximum view distance, times 4 to have some room)
 	std::vector<BrickmapsCpuData> _brickmapsData = std::vector<BrickmapsCpuData>(MAX_VIEW_GRID_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4);
-	unsigned int _lastBrickmapsDataIndex = 0; // save last reserved brickmap data vector cell index so we know the next cell not already reserved
+	// list of available brickmaps datas vector cells that can be write on (on readback step)
+	std::list<unsigned int> _availableBrickmapsIndex;
 
 	std::vector<BrickChunk*> _gpuLoadedChunks = std::vector<BrickChunk*>(MAX_VIEW_GRID_SIZE * REGION_SIZE_Y); //  pointer to chunks whose datas are cached for the GPU
 	std::unordered_map<glm::ivec3, ChunkCpuData> _tempChunks; // temporary chunk data hashmap to displace the chunks instead of reloading them if they are still in the view range
@@ -110,13 +111,22 @@ class GpuWorld {
 	// indicates which brickmap on the GPU needs to be updated on which frame (buffer 4 update)
 	std::vector<std::vector<glm::ivec4>> _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
 
+	GpuWorld() {
+		// at start, all brickmap datas vector cells are available
+		for (int i = 0; i < _brickmapsData.size(); i++) {
+			_availableBrickmapsIndex.push_back(i);
+		}
+	}
+
 	void loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos);
 
-	void rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 centralChunkWorldPos);
+	void rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 newCentralChunkWorldPos);
 
-	void saveChunks(glm::vec3 playerWorldPos);
+	void saveChunks(glm::vec3 newCentralChunkWorldPos);
 
 	void loadChunks(WorldRegion& region, glm::vec3 playerWorldPos);
+
+	void retrieveUnusedBrickmapsDatas();
 
 	void changeViewDistance(int& newViewDistance) {
 		_viewDistance = newViewDistance;

@@ -233,6 +233,9 @@ void Engine::run()
 		if (ImGui::InputInt("View distance", &newViewDistance, 1, 1)) {
 			newViewDistance = std::clamp(newViewDistance, 1, MAX_VIEW_DISTANCE);
 			changeViewDistance(newViewDistance);
+			if (newViewDistance < newLodDistance2x2x2) {
+				changeLodDistance2x2x2(newViewDistance);
+			}
 		}
 		if (ImGui::InputInt("LOD 2x2x2 distance", &newLodDistance2x2x2, 1, 1)) {
 			newLodDistance2x2x2 = std::clamp(newLodDistance2x2x2, 0, newViewDistance);
@@ -1203,35 +1206,33 @@ void Engine::readbackBuffers(int frameNumber)
 		else {
 			// case 2
 
-			bool notFound = true;
-
-			// retrieve the first available (that is, mark as unused) brickmapdata struct and save the new datas in it, then mark it as used
-			for (unsigned int i = _worldRenderingData._lastBrickmapsDataIndex; i < _worldRenderingData._brickmapsData.size(); i++) {
-				if (_worldRenderingData._brickmapsData[i]._used == false) {
-					// reference brickmaps data position in our chunk data
-					chunkData->_dataIndices[brickPositions.z] = i;
-
-					// save brickmap data and upload it
-					brickmapsDataSSBO[i]._brickmapData = chunk->_brickmaps[brickIndex];
-					_worldRenderingData._brickmapsData[i]._brickmapData = &chunk->_brickmaps[brickIndex];
-					_worldRenderingData._brickmapsData[i]._used = true;
-
-					// for second frame, save to queue
-					int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
-					_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
-
-					notFound = false;
-
-					_worldRenderingData._lastBrickmapsDataIndex = i+1;
-
-					break;
-				}
-			}
-
-			// TODO
-			// no more space left for brickmap case : clear unused brickmaps from array
-			if(notFound)
+			if (_worldRenderingData._availableBrickmapsIndex.empty() == true) {
+				// no more space left for brickmap case : retrieve unused brickmaps
 				ENGINE_LOG_WARNING("No more room on GPU for new brickmap, consider cleaning the array or add memory space for it");
+				_worldRenderingData.retrieveUnusedBrickmapsDatas();
+				break;
+			}
+			
+			// retrieve the first available (that is, mark as unused) brickmapdata struct and save the new datas in it, then mark it as used
+			unsigned int index = _worldRenderingData._availableBrickmapsIndex.front();
+			_worldRenderingData._availableBrickmapsIndex.pop_front();
+
+			if (_worldRenderingData._brickmapsData[index]._used == false) {
+				// save brickmaps data cell index in the chunk data
+				chunkData->_dataIndices[brickPositions.z] = index;
+
+				// save brickmap data and upload it
+				brickmapsDataSSBO[index]._brickmapData = chunk->_brickmaps[brickIndex];
+				_worldRenderingData._brickmapsData[index]._brickmapData = &chunk->_brickmaps[brickIndex];
+				_worldRenderingData._brickmapsData[index]._used = true;
+
+				// for second frame, save to its queue
+				int previousFrame = (frameNumber + 1) % FRAME_OVERLAP;
+				_worldRenderingData._dirtyBrickmapsQueue[previousFrame].push_back(brickPositions);
+			}
+			else {
+				ENGINE_LOG_WARNING("Brickmap index already used");
+			}
 		}
 		
 		editedChunks.push_back(loadedChunkIndex);

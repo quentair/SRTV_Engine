@@ -6,9 +6,9 @@ namespace srtv_engine::worldgen {
 
 void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerWorldPos)
 {
-    glm::ivec3 centralChunkWorldPos = glm::ivec3(floor(playerWorldPos.x / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.y / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.z / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION);
+    glm::ivec3 newCentralChunkWorldPos = glm::ivec3(floor(playerWorldPos.x / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.y / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION, floor(playerWorldPos.z / CHUNK_VOXEL_RESOLUTION) * CHUNK_VOXEL_RESOLUTION);
 
-    _playerChangedChunk = centralChunkWorldPos != _playerLastChunk;
+    _playerChangedChunk = newCentralChunkWorldPos != _playerLastChunk;
 
     if (_playerChangedChunk) {
 
@@ -17,7 +17,7 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
 
         _processingChunk = true;
 
-        _chunkLoadingThread = std::thread{ &GpuWorld::rollChunks, this, std::ref(regions) , playerWorldPos, centralChunkWorldPos};
+        _chunkLoadingThread = std::thread{ &GpuWorld::rollChunks, this, std::ref(regions) , playerWorldPos, newCentralChunkWorldPos};
 
         _chunkLoadingThread.detach();
     }
@@ -34,18 +34,13 @@ void GpuWorld::loadRegions(std::vector<WorldRegion*> &regions, glm::vec3 playerW
     }
 }
 
-void GpuWorld::rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 centralChunkWorldPos)
+void GpuWorld::rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWorldPos, glm::vec3 newCentralChunkWorldPos)
 {
-    // mark all the brickmap datas as unused for this frame, we will mark them back as used as we retrieve them when we roll the chunks (so that the datas of the chunks that are now out of range are mark as unused at the end)
-    /*for (int i = 0; i < _brickmapsData.size(); i++) {
-        _brickmapsData[i]._used = false;
-    }*/
-
     // clear queues to prevent out of date brickmap access on GPU readbacks
     _dirtyBrickmapsQueue = std::vector<std::vector<glm::ivec4>>(2);
 
     // save the chunks datas that we send to GPU in case the player moved from one chunk to another (so we don't erase datas when we load back new and old chunks to the GPU)
-    saveChunks(playerWorldPos);
+    saveChunks(newCentralChunkWorldPos);
 
     // load to GPU all chunks in given generated regions that are in the player view range
     for (auto& r : regions) {
@@ -56,13 +51,13 @@ void GpuWorld::rollChunks(std::vector<WorldRegion*>& regions, glm::vec3 playerWo
     }
 
     // save new player actual chunk at the end so we don't spawn multiple thread by going back and forth (_playerChangedChunk test), and mark the rolling operation as completed
-    _playerLastChunk = centralChunkWorldPos;
-    _viewgridAnchorWorldPos = glm::vec2(float(centralChunkWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION, float(centralChunkWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION);
+    _playerLastChunk = newCentralChunkWorldPos;
+    _viewgridAnchorWorldPos = glm::vec2(float(newCentralChunkWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION, float(newCentralChunkWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION);
 
     _processingChunk = false;
 }
 
-void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
+void GpuWorld::saveChunks(glm::vec3 newCentralChunkWorldPos)
 {
     // fill the temporary chunk data hashmap 
     // do this before actual chunks load algorithm because the load order depends on player displacement, otherwise we could overwrite and delete data that should be re-used (if player goes backward, back row to front row reload is needed, if player goes frontward, front row to top row reload is needed, same with columns if player goes left or right)
@@ -86,9 +81,30 @@ void GpuWorld::saveChunks(glm::vec3 playerWorldPos)
         glm::ivec3 centalChunkWorldPos = _playerLastChunk;
 
         glm::ivec3 gpuLoadedChunkWorldPos = glm::ivec3(centalChunkWorldPos.x + (xGrid - MAX_VIEW_DISTANCE) * CHUNK_VOXEL_RESOLUTION, yGrid * CHUNK_VOXEL_RESOLUTION, centalChunkWorldPos.z + (zGrid - MAX_VIEW_DISTANCE) * CHUNK_VOXEL_RESOLUTION);
-        
-        // save loaded chunk data
-        _tempChunks[gpuLoadedChunkWorldPos] = *chunkData;
+
+        // if the chunk is out of our viewing range after moving, we mark all the brickmaps used by the chunk as unused
+        // we will use them back by inserting their index in the corresponding queue
+        // we also completly unload the chunk and we do not save it in the map for rolling operation
+
+        // compute chunk world position to chunks grid coordinates
+        glm::ivec3 gpuLoadedChunkGridPos = glm::ivec3(floor(gpuLoadedChunkWorldPos.x / CHUNK_VOXEL_RESOLUTION), floor(gpuLoadedChunkWorldPos.y / CHUNK_VOXEL_RESOLUTION), floor(gpuLoadedChunkWorldPos.z / CHUNK_VOXEL_RESOLUTION));
+        glm::ivec3 newCentralChunkGridPos = glm::ivec3(floor(newCentralChunkWorldPos.x / CHUNK_VOXEL_RESOLUTION), floor(newCentralChunkWorldPos.y / CHUNK_VOXEL_RESOLUTION), floor(newCentralChunkWorldPos.z / CHUNK_VOXEL_RESOLUTION));
+
+        int difX = std::abs(gpuLoadedChunkGridPos.x - newCentralChunkGridPos.x);
+        int difZ = std::abs(gpuLoadedChunkGridPos.z - newCentralChunkGridPos.z);
+
+        if (difX > _viewDistance || difZ > _viewDistance) {
+            for (int i = 0; i < chunkData->_dataIndices.size(); i++) {
+                if (chunkData->_dataIndices[i] >= 0) {
+                    _brickmapsData[chunkData->_dataIndices[i]]._used = false;
+                    _availableBrickmapsIndex.push_front(chunkData->_dataIndices[i]);
+                }
+            }
+        }
+        else {
+            // save loaded chunk data for rolling operation
+            _tempChunks[gpuLoadedChunkWorldPos] = *chunkData;
+        }
 
         // clear the pointer to the chunk to avoid using outdated datas (pointer will be updated later if needed)
         _gpuLoadedChunks[i] = nullptr;
@@ -118,7 +134,7 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
     glm::ivec3 viegGridBottomLeftCorner = region.relativeWorldPosToChunkGridPosition(viegGridBottomLeftCornerCoordinates.x, 0, viegGridBottomLeftCornerCoordinates.z);
     glm::ivec3 viewGridUpperRightCorner = region.relativeWorldPosToChunkGridPosition(viewGridUpperRightCornerCoordinates.x, 0, viewGridUpperRightCornerCoordinates.z);
 
-    // same for maximum viewing range to sample loaded chunks on the right indices
+    // same for maximum viewing range to sample loaded chunks on the right indices of the array
     glm::vec3 maxViegGridBottomLeftCornerCoordinates = glm::vec3(floor(playerWorldPos.x) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.x, 0, floor(playerWorldPos.z) - MAX_VIEW_DISTANCE * CHUNK_VOXEL_RESOLUTION - regionPosition.z);
     glm::ivec3 maxViegGridBottomLeftCorner = region.relativeWorldPosToChunkGridPosition(maxViegGridBottomLeftCornerCoordinates.x, 0, maxViegGridBottomLeftCornerCoordinates.z);
 
@@ -186,11 +202,6 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                 {
                     _viewDistanceGrid[viewGridIndex] = 1; // indicates chunks column presence in the world (because at least one chunk of the column is present)
                     *chunkData = search->second;
-                    /*for (int i = 0; i < chunkData->_dataIndices.size(); i++) {
-                        if (chunkData->_dataIndices[i] >= 0) {
-                            _brickmapsData[chunkData->_dataIndices[i]]._used = true; // mark the chunk data as used so the brickmapdata buffer cell is reserved and not replaced later
-                        }
-                    }*/
                     continue;
                 }
 
@@ -211,6 +222,16 @@ void GpuWorld::loadChunks(WorldRegion &region, glm::vec3 playerWorldPos)
                 //chunk->_gpuChunkData = chunkData->_brickmapsData.data();
                 //chunk->_gpuIndices = chunkData->_brickmaps.data();
             }
+        }
+    }
+}
+
+void GpuWorld::retrieveUnusedBrickmapsDatas()
+{
+    // parse vector to retrieve every currently unused brickmaps data cell and place them back in the queue to be used again
+    for (int i = 0; i < _brickmapsData.size(); i++) {
+        if (_brickmapsData[i]._used == false) {
+            _availableBrickmapsIndex.push_back(i);
         }
     }
 }
